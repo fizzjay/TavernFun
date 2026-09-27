@@ -6202,7 +6202,7 @@ namespace TavernFun
             _restoreThirdPerson = flatscreen.ThirdPersonEnabled;
             _restoreLookLock = false;
             _restoreMovementLock = FlatscreenCore.SuppressPlayerMovement;
-            _restoreBendValues.Clear();
+            _originalBendValues.Clear();
             FindBodyBendSettings();
             _bendValue = _bendField != null && _settings.Count > 0 ? ReadBend(_settings[0]) : 0f;
             flatscreen.SetLookInputLocked(true);
