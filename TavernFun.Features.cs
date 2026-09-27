@@ -1648,7 +1648,7 @@ namespace TavernFun
             if (DrawGoldButton(refreshPlayers, "Refresh", false, false)) _worldTools.RefreshOnlinePlayers();
             GUILayout.EndHorizontal();
             _worldToolsPlayersScroll = GUILayout.BeginScrollView(_worldToolsPlayersScroll, GUILayout.Height(118f));
-            List<PlayerWorldTools.OnlinePlayer> players = _worldTools.OnlinePlayers;
+            IList<PlayerWorldTools.OnlinePlayer> players = _worldTools.OnlinePlayers;
             for (int i = 0; i < players.Count; i++)
             {
                 GUILayout.BeginHorizontal();
