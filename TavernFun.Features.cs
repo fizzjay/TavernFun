@@ -10,6 +10,7 @@ using Alta.Chunks;
 using UnityEngine.Rendering.PostProcessing;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -143,6 +144,16 @@ namespace TavernFun
         private Vector2 _dragOffsetDevToolsMenu;
         private Rect _lastDevToolsMenuRect;
         private readonly DevToolsController _devTools = new DevToolsController();
+        private readonly PlayerWorldTools _worldTools = new PlayerWorldTools();
+        private bool _worldToolsMenuOpen;
+        private Vector2 _worldToolsMenuPosition = new Vector2(590f, 60f);
+        private bool _isDraggingWorldToolsMenu;
+        private Vector2 _dragOffsetWorldToolsMenu;
+        private Rect _lastWorldToolsMenuRect;
+        private Vector2 _worldToolsMenuScroll;
+        private Vector2 _worldToolsPlayersScroll;
+        private string _espSearchInput = "";
+        private string _customTeleportInput = "";
         private Vector2 _fovMenuPosition = new Vector2(360f, 40f);
         private Rect _lastFovMenuRect;
         private bool _isDraggingFovMenu;
@@ -242,7 +253,7 @@ namespace TavernFun
         public void Update()
         {
             if (_input.IsMenuTogglePressed) { IsVisible = !IsVisible; }
-            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _worldToolsMenuOpen;
             _flatscreen.Tick();
             _weather.Tick();
             _graphics.Tick();
@@ -254,6 +265,7 @@ namespace TavernFun
             _hipMove.Tick(_flatscreen);
             _tpEffects.Tick();
             _revive.Tick();
+            _worldTools.Tick();
         }
         public void LateUpdate()
         {
@@ -331,6 +343,10 @@ namespace TavernFun
                 {
                     DrawDevToolsMenu();
                 }
+                if (_worldToolsMenuOpen)
+                {
+                    DrawWorldToolsMenu();
+                }
                 IsPointerOverUI = (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                                                 || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
                                                 || (_grabMenuOpen && _lastGrabMenuRect.Contains(mousePos))
@@ -343,8 +359,9 @@ namespace TavernFun
                                                 || (_jeanGreyMenuOpen && _lastJeanGreyMenuRect.Contains(mousePos))
                                                 || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
                                                 || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
-                                                || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos));
-                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen;
+                                                || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos))
+                                                || (_worldToolsMenuOpen && _lastWorldToolsMenuRect.Contains(mousePos));
+                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _worldToolsMenuOpen;
                 DevToolsDebugOverlay.Draw();
                 return;
             }
@@ -452,6 +469,10 @@ namespace TavernFun
             {
                 DrawDevToolsMenu();
             }
+            if (_worldToolsMenuOpen)
+            {
+                DrawWorldToolsMenu();
+            }
             IsPointerOverUI = _lastMainRect.Contains(mousePos)
                             || (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                             || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
@@ -465,8 +486,9 @@ namespace TavernFun
                             || (_jeanGreyMenuOpen && _lastJeanGreyMenuRect.Contains(mousePos))
                             || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
                             || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
-                            || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos));
-            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen;
+                            || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos))
+                            || (_worldToolsMenuOpen && _lastWorldToolsMenuRect.Contains(mousePos));
+            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _worldToolsMenuOpen;
             DevToolsDebugOverlay.Draw();
         }
 
@@ -1548,9 +1570,96 @@ namespace TavernFun
             }
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
+            GUILayout.BeginHorizontal();
             Rect devToolsRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
             if (DrawGoldButton(devToolsRect, "Dev Tools", _devToolsMenuOpen, false))
                 _devToolsMenuOpen = true;
+            GUILayout.FlexibleSpace();
+            Rect worldToolsRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(worldToolsRect, "ESP & Teleports", _worldToolsMenuOpen, false))
+                _worldToolsMenuOpen = true;
+            GUILayout.EndHorizontal();
+        }
+
+        private void DrawWorldToolsMenu()
+        {
+            EnsureStyles();
+            const int width = 360;
+            const int height = 560;
+            Rect outer = new Rect(_worldToolsMenuPosition.x, _worldToolsMenuPosition.y, width, height);
+            _lastWorldToolsMenuRect = outer;
+            GUI.DrawTexture(new Rect(outer.x + 4f, outer.y + 5f, outer.width, outer.height), _outerShadowTexture, ScaleMode.StretchToFill);
+            GUI.DrawTexture(outer, _outerFrameTexture, ScaleMode.StretchToFill);
+            Rect title = new Rect(outer.x + OuterFramePadding, outer.y + OuterFramePadding, outer.width - OuterFramePadding * 2f, TitleBarHeight);
+            GUI.DrawTexture(title, _titleBarTexture, ScaleMode.StretchToFill);
+            GUI.Label(new Rect(title.x, title.y + 1f, title.width, title.height), "ESP & TELEPORTS", _titleShadowStyle);
+            GUI.Label(title, "ESP & TELEPORTS", _titleLabelStyle);
+            HandleDrag(title, ref _worldToolsMenuPosition, ref _isDraggingWorldToolsMenu, ref _dragOffsetWorldToolsMenu);
+            Rect inner = new Rect(outer.x + OuterFramePadding, title.yMax + 4f, outer.width - OuterFramePadding * 2f, outer.height - TitleBarHeight - 14f);
+            GUI.DrawTexture(inner, _innerBackgroundTexture, ScaleMode.StretchToFill);
+            GUILayout.BeginArea(inner);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Find scene objects by name", _panelHeaderStyle);
+            GUILayout.FlexibleSpace();
+            Rect close = GUILayoutUtility.GetRect(58f, ActionButtonHeight, GUILayout.Width(58f));
+            if (DrawGoldButton(close, "Close", false, false)) _worldToolsMenuOpen = false;
+            GUILayout.EndHorizontal();
+
+            _espSearchInput = GUILayout.TextField(_espSearchInput ?? "", GUILayout.ExpandWidth(true));
+            GUILayout.BeginHorizontal();
+            Rect start = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(105f));
+            if (DrawGoldButton(start, "Start ESP", _worldTools.EspEnabled, false)) _worldTools.StartESP(_espSearchInput);
+            Rect stop = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(105f));
+            if (DrawGoldButton(stop, "Stop / Clear", false, false)) _worldTools.StopESP();
+            Rect labels = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(112f));
+            if (DrawGoldButton(labels, _worldTools.ShowLabels ? "Labels: On" : "Labels: Off", _worldTools.ShowLabels, false))
+                _worldTools.ShowLabels = !_worldTools.ShowLabels;
+            GUILayout.EndHorizontal();
+            GUILayout.Label(_worldTools.Status, _labelStyle);
+
+            GUILayout.Space(5f);
+            GUILayout.Label("Custom coordinates (X, Y, Z)", _panelHeaderStyle);
+            GUILayout.BeginHorizontal();
+            _customTeleportInput = GUILayout.TextField(_customTeleportInput ?? "", GUILayout.ExpandWidth(true));
+            Rect go = GUILayoutUtility.GetRect(54f, ActionButtonHeight, GUILayout.Width(54f));
+            if (DrawGoldButton(go, "Go", false, false)) _worldTools.TeleportToCoordinates(_customTeleportInput);
+            GUILayout.EndHorizontal();
+
+            GUILayout.Label("Saved destinations", _panelHeaderStyle);
+            _worldToolsMenuScroll = GUILayout.BeginScrollView(_worldToolsMenuScroll, GUILayout.Height(142f));
+            for (int i = 0; i < PlayerWorldTools.DestinationCount; i++)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(PlayerWorldTools.GetDestinationName(i), _labelStyle, GUILayout.Width(176f));
+                GUILayout.FlexibleSpace();
+                Rect goDestination = GUILayoutUtility.GetRect(70f, ActionButtonHeight, GUILayout.Width(70f));
+                if (DrawGoldButton(goDestination, "Teleport", false, false)) _worldTools.TeleportToDestination(i);
+                GUILayout.EndHorizontal();
+                GUILayout.Space(2f);
+            }
+            GUILayout.EndScrollView();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Online players", _panelHeaderStyle);
+            GUILayout.FlexibleSpace();
+            GUILayout.Label(_worldTools.OnlinePlayers.Count.ToString(), _labelStyle);
+            Rect refreshPlayers = GUILayoutUtility.GetRect(72f, ActionButtonHeight, GUILayout.Width(72f));
+            if (DrawGoldButton(refreshPlayers, "Refresh", false, false)) _worldTools.RefreshOnlinePlayers();
+            GUILayout.EndHorizontal();
+            _worldToolsPlayersScroll = GUILayout.BeginScrollView(_worldToolsPlayersScroll, GUILayout.Height(118f));
+            List<PlayerWorldTools.OnlinePlayer> players = _worldTools.OnlinePlayers;
+            for (int i = 0; i < players.Count; i++)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(players[i].Name, _labelStyle, GUILayout.Width(205f));
+                GUILayout.FlexibleSpace();
+                Rect teleportToPlayer = GUILayoutUtility.GetRect(70f, ActionButtonHeight, GUILayout.Width(70f));
+                if (DrawGoldButton(teleportToPlayer, "Teleport", false, false)) _worldTools.TeleportToPlayer(players[i]);
+                GUILayout.EndHorizontal();
+            }
+            GUILayout.EndScrollView();
+            GUILayout.EndArea();
         }
 
         private static Camera GetLocalPlayerCamera()
@@ -6616,6 +6725,404 @@ namespace TavernFun
         }
     }
 
+
+    internal sealed class PlayerWorldTools
+    {
+        private const int MaxEspMarkers = 250;
+        private const float EspRefreshInterval = 2f;
+        private static readonly string[] DestinationNames = new string[]
+        {
+            "PlayerSpawn", "BlackSmith", "Carpentry", "Tavern", "TownHall", "Home", "Cave127", "Tower",
+            "PlotOutsideMap", "MountainTopCamp", "MiningHouse", "CraftingHouse", "Shops", "HebiousCamp1",
+            "Trap", "FleaMarket", "CarnivalLand", "BlindPlace", "Forging", "Mining", "Melee", "Range", "Climbing", "Woodcutting"
+        };
+        private static readonly Vector3[] DestinationPositions = new Vector3[]
+        {
+            new Vector3(-691.062f, 129.298f, 72.524f),
+            new Vector3(-737.8415f, 134.16968f, 8.566498f),
+            new Vector3(-748.00446f, 130.12466f, 87.894f),
+            new Vector3(-801.8606f, 135.77469f, -5.0390005f),
+            new Vector3(-900.746f, 162.46484f, 109.066f),
+            new Vector3(-301.186f, 128.31999f, -132.654f),
+            new Vector3(-703.60114f, -1798.563f, -1100.5371f),
+            new Vector3(-925.688f, 797.5f, -1760.318f),
+            new Vector3(-2027.221f, 211.037f, 2030.3f),
+            new Vector3(-407.345f, 172.31299f, 144.429f),
+            new Vector3(-842.201f, 143.804f, 36.987f),
+            new Vector3(-796.3364f, 143.5237f, 103.409004f),
+            new Vector3(-804.7894f, 135.171f, 50.216f),
+            new Vector3(-301.186f, 128.31999f, -132.654f),
+            new Vector3(-1145.411f, 496.216f, -1261.214f),
+            new Vector3(-1242.494f, 765.977f, 864.094f),
+            new Vector3(1564.192f, 239.364f, 201.379f),
+            new Vector3(-717.259f, 105.237f, 0.2730019f),
+            new Vector3(-642.476f, 151.46799f, 20.122f),
+            new Vector3(-825.0035f, 180.54062f, -60.31f),
+            new Vector3(-1403.143f, 177.07399f, 161.848f),
+            new Vector3(-834.661f, 214.09401f, 384.151f),
+            new Vector3(-873.467f, 528.38696f, -1761.549f),
+            new Vector3(-405.492f, 164.13399f, 19.685999f)
+        };
+        private readonly List<EspMarker> _markers = new List<EspMarker>();
+        private readonly List<OnlinePlayer> _onlinePlayers = new List<OnlinePlayer>();
+        private Material _overlayMaterial;
+        private float _nextRefreshTime;
+        private float _nextPlayersRefreshTime;
+        private bool _espEnabled;
+        private string _espInput = "";
+        private string _status = "Enter a name fragment to mark scene objects.";
+        private Type _playersType;
+
+        internal bool EspEnabled { get { return _espEnabled; } }
+        internal bool ShowLabels { get; set; } = true;
+        internal string Status { get { return _status; } }
+        internal IList<OnlinePlayer> OnlinePlayers { get { return _onlinePlayers; } }
+        internal static int DestinationCount { get { return DestinationNames.Length; } }
+
+        internal sealed class OnlinePlayer
+        {
+            internal string Name;
+            internal PlayerController Controller;
+        }
+
+        private sealed class EspMarker
+        {
+            internal Transform Target;
+            internal GameObject Ball;
+            internal GameObject LabelRoot;
+            internal TextMesh Label;
+            internal Vector3 BaseScale;
+            internal float Phase;
+            internal bool Parented;
+        }
+
+        internal static string GetDestinationName(int index)
+        {
+            return index >= 0 && index < DestinationNames.Length ? DestinationNames[index] : "Unknown";
+        }
+
+        internal void Tick()
+        {
+            if (Time.unscaledTime >= _nextPlayersRefreshTime) RefreshOnlinePlayers();
+            if (!_espEnabled) return;
+            Camera camera = GetLocalPlayerCamera();
+            if (camera == null) return;
+            float now = Time.time;
+            for (int i = _markers.Count - 1; i >= 0; i--)
+            {
+                EspMarker marker = _markers[i];
+                if (marker == null || !IsLiveTransform(marker.Target) || marker.Ball == null)
+                {
+                    DestroyMarker(marker);
+                    _markers.RemoveAt(i);
+                    continue;
+                }
+                if (!marker.Parented)
+                {
+                    marker.Ball.transform.position = marker.Target.position;
+                    marker.Ball.transform.rotation = marker.Target.rotation;
+                }
+                marker.Ball.transform.localScale = marker.BaseScale * (1f + Mathf.Sin((now + marker.Phase) * 3.2f) * 0.12f);
+                if (marker.LabelRoot != null && marker.Label != null)
+                {
+                    marker.LabelRoot.SetActive(ShowLabels);
+                    if (ShowLabels)
+                    {
+                        Vector3 labelPosition = marker.Ball.transform.position + Vector3.up * 0.35f;
+                        marker.LabelRoot.transform.position = labelPosition;
+                        Vector3 toCamera = camera.transform.position - labelPosition;
+                        if (toCamera.sqrMagnitude > 0.001f) marker.LabelRoot.transform.rotation = Quaternion.LookRotation(toCamera);
+                        float distance = Mathf.Max(Vector3.Distance(labelPosition, camera.transform.position), 1f);
+                        marker.LabelRoot.transform.localScale = Vector3.one * Mathf.Clamp(distance * 0.012f, 0.06f, 0.45f);
+                    }
+                }
+            }
+            if (now >= _nextRefreshTime)
+            {
+                AddNewEspMatches();
+                _nextRefreshTime = now + EspRefreshInterval;
+            }
+        }
+
+        internal void StartESP(string search)
+        {
+            _espInput = (search ?? "").Trim();
+            if (_espInput.Length == 0)
+            {
+                _status = "ESP: type a search string first.";
+                return;
+            }
+            ClearMarkers();
+            EnsureOverlayMaterial();
+            _espEnabled = true;
+            _nextRefreshTime = Time.time;
+            AddNewEspMatches();
+            _nextRefreshTime = Time.time + EspRefreshInterval;
+            _status = "ESP active for '" + _espInput + "' (" + _markers.Count + " markers).";
+        }
+
+        internal void StopESP()
+        {
+            _espEnabled = false;
+            ClearMarkers();
+            _status = "ESP stopped; markers cleared.";
+        }
+
+        internal void RefreshOnlinePlayers()
+        {
+            _onlinePlayers.Clear();
+            _nextPlayersRefreshTime = Time.unscaledTime + 3f;
+            object playerCollection = null;
+            try
+            {
+                if (_playersType == null) _playersType = AccessTools.TypeByName("Alta.Character.Player") ?? typeof(Player);
+                PropertyInfo property = AccessTools.Property(_playersType, "AllPlayers");
+                if (property != null) playerCollection = property.GetValue(null, null);
+                else
+                {
+                    FieldInfo field = AccessTools.Field(_playersType, "AllPlayers");
+                    if (field != null) playerCollection = field.GetValue(null);
+                }
+            }
+            catch (Exception ex) { _status = "Player list unavailable: " + ex.GetBaseException().Message; }
+            IEnumerable enumerable = playerCollection as IEnumerable;
+            if (enumerable == null) return;
+            HashSet<int> seen = new HashSet<int>();
+            foreach (object player in enumerable)
+            {
+                if (player == null) continue;
+                try
+                {
+                    PlayerController controller = ReadMember(player, "PlayerController") as PlayerController;
+                    if (controller == null || controller == PlayerController.Current) continue;
+                    int id = controller.GetInstanceID();
+                    if (!seen.Add(id)) continue;
+                    object userInfo = ReadMember(player, "UserInfo");
+                    object nameValue = ReadMember(userInfo, "Username") ?? ReadMember(player, "Username") ?? ReadMember(player, "Name");
+                    string name = nameValue == null ? controller.gameObject.name : nameValue.ToString();
+                    _onlinePlayers.Add(new OnlinePlayer { Name = name, Controller = controller });
+                }
+                catch { }
+            }
+            _onlinePlayers.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+            if (_onlinePlayers.Count > 0 && !_espEnabled) _status = "Online players refreshed (" + _onlinePlayers.Count + ").";
+        }
+
+        internal bool TeleportToDestination(int index)
+        {
+            if (index < 0 || index >= DestinationPositions.Length) return false;
+            return TeleportLocalPlayer(DestinationPositions[index], "Teleported to " + DestinationNames[index] + ".");
+        }
+
+        internal bool TeleportToPlayer(OnlinePlayer player)
+        {
+            if (player == null || player.Controller == null)
+            {
+                _status = "That player is no longer available.";
+                RefreshOnlinePlayers();
+                return false;
+            }
+            Vector3 position = player.Controller.PlayerFeetPosition + Vector3.up * 0.2f;
+            return TeleportLocalPlayer(position, "Teleported near " + player.Name + ".");
+        }
+
+        internal bool TeleportToCoordinates(string input)
+        {
+            string[] parts = (input ?? "").Split(',');
+            if (parts.Length != 3)
+            {
+                _status = "Coordinates must be X, Y, Z.";
+                return false;
+            }
+            float x, y, z;
+            if (!TryParseCoordinate(parts[0], out x) || !TryParseCoordinate(parts[1], out y) || !TryParseCoordinate(parts[2], out z))
+            {
+                _status = "Invalid coordinates; use numeric X, Y, Z.";
+                return false;
+            }
+            return TeleportLocalPlayer(new Vector3(x, y, z), "Teleported to custom coordinates.");
+        }
+
+        private bool TeleportLocalPlayer(Vector3 position, string success)
+        {
+            PlayerController player = PlayerController.Current;
+            if (player == null)
+            {
+                _status = "Local player is not ready.";
+                return false;
+            }
+            object locomotion = ReadMember(player, "LocomotionController");
+            if (locomotion == null)
+            {
+                _status = "Locomotion controller was not found.";
+                return false;
+            }
+            try
+            {
+                MethodInfo[] methods = locomotion.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                for (int i = 0; i < methods.Length; i++)
+                {
+                    MethodInfo method = methods[i];
+                    if (method.Name != "MoveTo") continue;
+                    ParameterInfo[] parameters = method.GetParameters();
+                    if (parameters.Length == 2 && parameters[0].ParameterType == typeof(Vector3))
+                    {
+                        object mode = DefaultArgument(parameters[1].ParameterType);
+                        if (mode == null && parameters[1].ParameterType.IsValueType) continue;
+                        method.Invoke(locomotion, new object[] { position, mode });
+                        _status = success;
+                        return true;
+                    }
+                    if (parameters.Length == 1 && parameters[0].ParameterType == typeof(Vector3))
+                    {
+                        method.Invoke(locomotion, new object[] { position });
+                        _status = success;
+                        return true;
+                    }
+                }
+                _status = "No compatible locomotion MoveTo method was found.";
+            }
+            catch (Exception ex) { _status = "Teleport failed: " + ex.GetBaseException().Message; }
+            return false;
+        }
+
+        private static object DefaultArgument(Type type)
+        {
+            if (type.IsEnum) return Enum.ToObject(type, 0);
+            if (!type.IsValueType) return null;
+            try { return Activator.CreateInstance(type); }
+            catch { return null; }
+        }
+
+        private static bool TryParseCoordinate(string value, out float result)
+        {
+            return float.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out result)
+                || float.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.CurrentCulture, out result);
+        }
+
+        private void AddNewEspMatches()
+        {
+            if (string.IsNullOrEmpty(_espInput) || _markers.Count >= MaxEspMarkers) return;
+            HashSet<int> roots = new HashSet<int>();
+            for (int i = 0; i < _markers.Count; i++)
+                if (_markers[i] != null && IsLiveTransform(_markers[i].Target)) roots.Add(_markers[i].Target.root.GetInstanceID());
+            Transform[] transforms;
+            try { transforms = Object.FindObjectsOfType<Transform>(true); }
+            catch { transforms = Resources.FindObjectsOfTypeAll<Transform>(); }
+            for (int i = 0; i < transforms.Length && _markers.Count < MaxEspMarkers; i++)
+            {
+                Transform target = transforms[i];
+                if (!IsLiveTransform(target) || target.name.StartsWith("ESP_Marker_", StringComparison.OrdinalIgnoreCase)
+                    || target.name.StartsWith("ESP_Label", StringComparison.OrdinalIgnoreCase)
+                    || target.name.IndexOf(_espInput, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                int rootId = target.root.GetInstanceID();
+                if (!roots.Add(rootId)) continue;
+                EspMarker marker = CreateMarker(target);
+                if (marker != null) _markers.Add(marker);
+            }
+            _status = "ESP active for '" + _espInput + "' (" + _markers.Count + "/" + MaxEspMarkers + " markers).";
+        }
+
+        private EspMarker CreateMarker(Transform target)
+        {
+            try
+            {
+                GameObject ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                ball.name = "ESP_Marker_" + target.name;
+                Collider collider = ball.GetComponent<Collider>();
+                if (collider != null) Object.Destroy(collider);
+                Renderer renderer = ball.GetComponent<Renderer>();
+                EnsureOverlayMaterial();
+                if (renderer != null) renderer.sharedMaterial = _overlayMaterial;
+                if (target == null) { Object.Destroy(ball); return null; }
+                ball.transform.position = target.position;
+                Vector3 scale = Vector3.one * 0.22f;
+                bool parented = false;
+                if (parented) ball.transform.SetParent(target, true);
+                GameObject labelRoot = new GameObject("ESP_LabelRoot");
+                TextMesh label = new GameObject("ESP_Label").AddComponent<TextMesh>();
+                label.transform.SetParent(labelRoot.transform, false);
+                label.text = Truncate(target.name, 28);
+                label.fontSize = 64;
+                label.characterSize = 0.02f;
+                label.anchor = TextAnchor.MiddleCenter;
+                label.alignment = TextAlignment.Center;
+                label.color = Color.white;
+                Renderer labelRenderer = label.GetComponent<Renderer>();
+                if (labelRenderer != null && labelRenderer.sharedMaterial != null) labelRenderer.sharedMaterial.renderQueue = 5000;
+                return new EspMarker { Target = target, Ball = ball, LabelRoot = labelRoot, Label = label, BaseScale = scale, Phase = UnityEngine.Random.value * 10f, Parented = parented };
+            }
+            catch (Exception ex)
+            {
+                _status = "ESP marker error: " + ex.GetBaseException().Message;
+                return null;
+            }
+        }
+
+        private void EnsureOverlayMaterial()
+        {
+            if (_overlayMaterial != null) return;
+            Shader shader = Shader.Find("Hidden/Internal-Colored") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Standard");
+            if (shader == null) return;
+            _overlayMaterial = new Material(shader);
+            if (_overlayMaterial.HasProperty("_Color")) _overlayMaterial.SetColor("_Color", new Color(0.1f, 0.95f, 1f, 1f));
+            if (_overlayMaterial.HasProperty("_ZWrite")) _overlayMaterial.SetInt("_ZWrite", 0);
+            if (_overlayMaterial.HasProperty("_ZTest")) _overlayMaterial.SetInt("_ZTest", 8);
+            _overlayMaterial.renderQueue = 5000;
+            _overlayMaterial.hideFlags = HideFlags.HideAndDontSave;
+        }
+
+        private static bool IsLiveTransform(Transform target)
+        {
+            if (target == null || target.gameObject == null) return false;
+            Scene scene = target.gameObject.scene;
+            return scene.IsValid() && scene.isLoaded && target.gameObject.activeInHierarchy;
+        }
+
+        private static Camera GetLocalPlayerCamera()
+        {
+            try
+            {
+                if (PlayerController.Current != null && PlayerController.Current.Camera != null) return PlayerController.Current.Camera;
+            }
+            catch { }
+            return Camera.main;
+        }
+
+        private void ClearMarkers()
+        {
+            for (int i = _markers.Count - 1; i >= 0; i--) DestroyMarker(_markers[i]);
+            _markers.Clear();
+        }
+
+        private static void DestroyMarker(EspMarker marker)
+        {
+            if (marker == null) return;
+            if (marker.LabelRoot != null) Object.Destroy(marker.LabelRoot);
+            if (marker.Ball != null) Object.Destroy(marker.Ball);
+        }
+
+        private static string Truncate(string value, int max)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= max) return value;
+            return value.Substring(0, max - 1) + "…";
+        }
+
+        private static object ReadMember(object target, string name)
+        {
+            if (target == null) return null;
+            Type type = target.GetType();
+            try
+            {
+                PropertyInfo property = AccessTools.Property(type, name);
+                if (property != null) return property.GetValue(target, null);
+                FieldInfo field = AccessTools.Field(type, name);
+                if (field != null) return field.GetValue(target);
+            }
+            catch { }
+            return null;
+        }
+    }
 
     // Reproduces the bundled teleport-effect shapes through PlayerEffectController's
     // remoteTeleportEffect RPC. A bounded number of effect events are emitted each cycle.
