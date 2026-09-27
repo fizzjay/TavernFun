@@ -32,18 +32,16 @@ namespace TavernFun
     {
         private static readonly HarmonyLib.Harmony HarmonyInstance = new HarmonyLib.Harmony("Tavernfun.fizzjay");
 
-public override void OnInitializeMelon()
-    {
-        HarmonyInstance.PatchAll();
-        TavernFun.AmbienceSoundPatch.TryApply(HarmonyInstance);
-        _menu.Init();
-        StartPuppetMods();
-    }
+        public override void OnInitializeMelon()
+        {
+            HarmonyInstance.PatchAll();
+            TavernFun.AmbienceSoundPatch.TryApply(HarmonyInstance);
+            _menu.Init();
+        }
 
-    public override void OnUpdate()
+        public override void OnUpdate()
         {
             _menu.Update();
-            PumpPuppetMods();
         }
 
         public override void OnLateUpdate()
@@ -54,100 +52,6 @@ public override void OnInitializeMelon()
         public override void OnGUI()
         {
             _menu.Draw();
-        }
-
-        // ---- Baked TownshipPuppeteer (see PuppeteerBaked.cs) ---------------
-        // MelonLoader only instantiates the type named in [assembly: MelonInfo]
-        // (this class), so the puppet's own MelonMod subclasses -
-        // TownshipPuppeteerV2.Core and TownshipPuppeteerHeightKeys.HeightKeysMod -
-        // are never created by the loader. Core.OnInitializeMelon is what boots
-        // the UniverseLib menu behind the "Puppet - quit/mearly" button, so drive
-        // both mods from here: create them during init and pump their lifecycle
-        // callbacks from ours.
-        private static MelonMod _puppetCore;
-        private static MelonMod _puppetHeightKeys;
-        private static bool _puppetCoreUpdateFailed;
-        private static bool _puppetHeightKeysUpdateFailed;
-
-        private static void StartPuppetMods()
-        {
-            try
-            {
-                TownshipPuppeteerV2.Core core = new TownshipPuppeteerV2.Core();
-                core.OnInitializeMelon();
-                _puppetCore = core;
-                MelonLogger.Msg("[Puppet] Core started.");
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Error("[Puppet] Core start failed: " + ex);
-            }
-            try
-            {
-                TownshipPuppeteerHeightKeys.HeightKeysMod heightKeys = new TownshipPuppeteerHeightKeys.HeightKeysMod();
-                heightKeys.OnInitializeMelon();
-                _puppetHeightKeys = heightKeys;
-                MelonLogger.Msg("[Puppet] HeightKeys started.");
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Error("[Puppet] HeightKeys start failed: " + ex);
-            }
-        }
-
-        private static void PumpPuppetMods()
-        {
-            if (_puppetCore != null && !_puppetCoreUpdateFailed)
-            {
-                try
-                {
-                    _puppetCore.OnUpdate();
-                }
-                catch (Exception ex)
-                {
-                    _puppetCoreUpdateFailed = true;
-                    MelonLogger.Error("[Puppet] Core.OnUpdate failed - no longer pumping it: " + ex);
-                }
-            }
-            if (_puppetHeightKeys != null && !_puppetHeightKeysUpdateFailed)
-            {
-                try
-                {
-                    _puppetHeightKeys.OnUpdate();
-                }
-                catch (Exception ex)
-                {
-                    _puppetHeightKeysUpdateFailed = true;
-                    MelonLogger.Error("[Puppet] HeightKeys.OnUpdate failed - no longer pumping it: " + ex);
-                }
-            }
-        }
-
-        public override void OnSceneWasLoaded(int buildIndex, string sceneName)
-        {
-            base.OnSceneWasLoaded(buildIndex, sceneName);
-            if (_puppetCore != null)
-            {
-                try
-                {
-                    _puppetCore.OnSceneWasLoaded(buildIndex, sceneName);
-                }
-                catch (Exception ex)
-                {
-                    MelonLogger.Error("[Puppet] Core.OnSceneWasLoaded failed: " + ex);
-                }
-            }
-            if (_puppetHeightKeys != null)
-            {
-                try
-                {
-                    _puppetHeightKeys.OnSceneWasLoaded(buildIndex, sceneName);
-                }
-                catch (Exception ex)
-                {
-                    MelonLogger.Error("[Puppet] HeightKeys.OnSceneWasLoaded failed: " + ex);
-                }
-            }
         }
 
         private readonly ControlMenu _menu = new ControlMenu();

@@ -13,7 +13,6 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
-using UnityEngine.EventSystems;
 using Object = UnityEngine.Object;
 
 
@@ -189,11 +188,6 @@ namespace TavernFun
         private Vector2 _panKakeScroll;
         private Vector2 _tabScroll;
 
-        // Baked-in TownshipPuppeteer menu (see PuppeteerBaked.cs) - opened with
-        // the "Puppet - quit/mearly" button on the Anything tab (Tab in game
-        // opens it too, like the original mod did).
-        private bool _puppetMenuOpen;
-
         // Draggable window positions.
         private Vector2 _windowPosition = new Vector2(18f, 12f);
         private bool _isDraggingMain;
@@ -241,7 +235,7 @@ namespace TavernFun
         public void Update()
         {
             if (_input.IsMenuTogglePressed) { IsVisible = !IsVisible; }
-            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen;
             _flatscreen.Tick();
             _weather.Tick();
             _graphics.Tick();
@@ -336,9 +330,8 @@ namespace TavernFun
                                                 || (_fingerMenuOpen && _lastFingerMenuRect.Contains(mousePos))
                                                 || (_jeanGreyMenuOpen && _lastJeanGreyMenuRect.Contains(mousePos))
                                                 || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
-                                                || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
-                                                || IsPointerOverUgui();
-                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
+                                                || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos));
+                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen;
                 return;
             }
             EnsureStyles();
@@ -453,19 +446,10 @@ namespace TavernFun
                             || (_tpEffectsMenuOpen && _lastTpEffectsMenuRect.Contains(mousePos))
                             || (_jeanGreyMenuOpen && _lastJeanGreyMenuRect.Contains(mousePos))
                             || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
-                            || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
-                            || IsPointerOverUgui();
-            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
+                            || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos));
+            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen;
         }
 
-        // The Puppet menu is uGUI (UniverseLib), so the IMGUI rect checks above
-        // can't see it - the EventSystem check can. While the pointer is over
-        // it, desktop hand emulation must not treat clicks as in-game grabs.
-        private static bool IsPointerOverUgui()
-        {
-            EventSystem es = EventSystem.current;
-            return es != null && es.IsPointerOverGameObject();
-        }
         private void DrawTabs()
         {
             GUILayout.BeginHorizontal();
@@ -2303,20 +2287,8 @@ namespace TavernFun
                 _perfMenuOpen = true;
             }
             GUILayout.Space(6f);
-
-            // Baked-in TownshipPuppeteer menu (PuppeteerBaked.cs). This opens the
-            // puppet's own UniverseLib panel - its own style, not this IMGUI one.
-            // Kept in sync every frame so the highlight also reflects the Tab
-            // key and the panel's own "—" close button.
-            _puppetMenuOpen = TownshipPuppeteer.PuppetMenuBridge.IsOpen;
-            Rect puppetRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(200f));
-            bool puppetRightClicked = WasRightClicked(puppetRect); // must run BEFORE DrawGoldButton
-            if (puppetRightClicked || DrawGoldButton(puppetRect, "Puppet - quit/mearly", _puppetMenuOpen, false))
-            {
-                TownshipPuppeteer.PuppetMenuBridge.Toggle();
-                _puppetMenuOpen = TownshipPuppeteer.PuppetMenuBridge.IsOpen;
-            }
         }
+
         private void DrawGraphicsMenu()
         {
             EnsureStyles();
