@@ -145,12 +145,17 @@ namespace TavernFun
         private Rect _lastDevToolsMenuRect;
         private readonly DevToolsController _devTools = new DevToolsController();
         private readonly PlayerWorldTools _worldTools = new PlayerWorldTools();
-        private bool _worldToolsMenuOpen;
-        private Vector2 _worldToolsMenuPosition = new Vector2(590f, 60f);
-        private bool _isDraggingWorldToolsMenu;
-        private Vector2 _dragOffsetWorldToolsMenu;
-        private Rect _lastWorldToolsMenuRect;
-        private Vector2 _worldToolsMenuScroll;
+        private bool _espMenuOpen;
+        private Vector2 _espMenuPosition = new Vector2(390f, 90f);
+        private bool _isDraggingEspMenu;
+        private Vector2 _dragOffsetEspMenu;
+        private Rect _lastEspMenuRect;
+        private bool _teleportsMenuOpen;
+        private Vector2 _teleportsMenuPosition = new Vector2(750f, 70f);
+        private bool _isDraggingTeleportsMenu;
+        private Vector2 _dragOffsetTeleportsMenu;
+        private Rect _lastTeleportsMenuRect;
+        private Vector2 _teleportsMenuScroll;
         private Vector2 _worldToolsPlayersScroll;
         private string _espSearchInput = "";
         private string _customTeleportInput = "";
@@ -253,7 +258,7 @@ namespace TavernFun
         public void Update()
         {
             if (_input.IsMenuTogglePressed) { IsVisible = !IsVisible; }
-            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _worldToolsMenuOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen;
             _flatscreen.Tick();
             _weather.Tick();
             _graphics.Tick();
@@ -343,10 +348,8 @@ namespace TavernFun
                 {
                     DrawDevToolsMenu();
                 }
-                if (_worldToolsMenuOpen)
-                {
-                    DrawWorldToolsMenu();
-                }
+                if (_espMenuOpen) DrawEspMenu();
+                if (_teleportsMenuOpen) DrawTeleportsMenu();
                 IsPointerOverUI = (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                                                 || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
                                                 || (_grabMenuOpen && _lastGrabMenuRect.Contains(mousePos))
@@ -360,8 +363,9 @@ namespace TavernFun
                                                 || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
                                                 || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
                                                 || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos))
-                                                || (_worldToolsMenuOpen && _lastWorldToolsMenuRect.Contains(mousePos));
-                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _worldToolsMenuOpen;
+                                                || (_espMenuOpen && _lastEspMenuRect.Contains(mousePos))
+                                                || (_teleportsMenuOpen && _lastTeleportsMenuRect.Contains(mousePos));
+                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen;
                 DevToolsDebugOverlay.Draw();
                 return;
             }
@@ -469,10 +473,8 @@ namespace TavernFun
             {
                 DrawDevToolsMenu();
             }
-            if (_worldToolsMenuOpen)
-            {
-                DrawWorldToolsMenu();
-            }
+            if (_espMenuOpen) DrawEspMenu();
+            if (_teleportsMenuOpen) DrawTeleportsMenu();
             IsPointerOverUI = _lastMainRect.Contains(mousePos)
                             || (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                             || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
@@ -487,8 +489,9 @@ namespace TavernFun
                             || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
                             || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
                             || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos))
-                            || (_worldToolsMenuOpen && _lastWorldToolsMenuRect.Contains(mousePos));
-            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _worldToolsMenuOpen;
+                            || (_espMenuOpen && _lastEspMenuRect.Contains(mousePos))
+                            || (_teleportsMenuOpen && _lastTeleportsMenuRect.Contains(mousePos));
+            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen;
             DevToolsDebugOverlay.Draw();
         }
 
@@ -1570,42 +1573,42 @@ namespace TavernFun
             }
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
-            GUILayout.BeginHorizontal();
             Rect devToolsRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
             if (DrawGoldButton(devToolsRect, "Dev Tools", _devToolsMenuOpen, false))
                 _devToolsMenuOpen = true;
+            GUILayout.Space(6f);
+            GUILayout.BeginHorizontal();
+            Rect espButton = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(espButton, "ESP", _espMenuOpen, false)) _espMenuOpen = true;
             GUILayout.FlexibleSpace();
-            Rect worldToolsRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
-            if (DrawGoldButton(worldToolsRect, "ESP & Teleports", _worldToolsMenuOpen, false))
-                _worldToolsMenuOpen = true;
+            Rect teleportsButton = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(teleportsButton, "Teleports", _teleportsMenuOpen, false)) _teleportsMenuOpen = true;
             GUILayout.EndHorizontal();
         }
 
-        private void DrawWorldToolsMenu()
+        private void DrawEspMenu()
         {
             EnsureStyles();
-            const int width = 360;
-            const int height = 560;
-            Rect outer = new Rect(_worldToolsMenuPosition.x, _worldToolsMenuPosition.y, width, height);
-            _lastWorldToolsMenuRect = outer;
+            const int width = 340;
+            const int height = 260;
+            Rect outer = new Rect(_espMenuPosition.x, _espMenuPosition.y, width, height);
+            _lastEspMenuRect = outer;
             GUI.DrawTexture(new Rect(outer.x + 4f, outer.y + 5f, outer.width, outer.height), _outerShadowTexture, ScaleMode.StretchToFill);
             GUI.DrawTexture(outer, _outerFrameTexture, ScaleMode.StretchToFill);
             Rect title = new Rect(outer.x + OuterFramePadding, outer.y + OuterFramePadding, outer.width - OuterFramePadding * 2f, TitleBarHeight);
             GUI.DrawTexture(title, _titleBarTexture, ScaleMode.StretchToFill);
-            GUI.Label(new Rect(title.x, title.y + 1f, title.width, title.height), "ESP & TELEPORTS", _titleShadowStyle);
-            GUI.Label(title, "ESP & TELEPORTS", _titleLabelStyle);
-            HandleDrag(title, ref _worldToolsMenuPosition, ref _isDraggingWorldToolsMenu, ref _dragOffsetWorldToolsMenu);
+            GUI.Label(new Rect(title.x, title.y + 1f, title.width, title.height), "ESP", _titleShadowStyle);
+            GUI.Label(title, "ESP", _titleLabelStyle);
+            HandleDrag(title, ref _espMenuPosition, ref _isDraggingEspMenu, ref _dragOffsetEspMenu);
             Rect inner = new Rect(outer.x + OuterFramePadding, title.yMax + 4f, outer.width - OuterFramePadding * 2f, outer.height - TitleBarHeight - 14f);
             GUI.DrawTexture(inner, _innerBackgroundTexture, ScaleMode.StretchToFill);
             GUILayout.BeginArea(inner);
-
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Find scene objects by name", _panelHeaderStyle);
+            GUILayout.Label("Search scene objects by name", _panelHeaderStyle);
             GUILayout.FlexibleSpace();
             Rect close = GUILayoutUtility.GetRect(58f, ActionButtonHeight, GUILayout.Width(58f));
-            if (DrawGoldButton(close, "Close", false, false)) _worldToolsMenuOpen = false;
+            if (DrawGoldButton(close, "Close", false, false)) _espMenuOpen = false;
             GUILayout.EndHorizontal();
-
             _espSearchInput = GUILayout.TextField(_espSearchInput ?? "", GUILayout.ExpandWidth(true));
             GUILayout.BeginHorizontal();
             Rect start = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(105f));
@@ -1616,18 +1619,41 @@ namespace TavernFun
             if (DrawGoldButton(labels, _worldTools.ShowLabels ? "Labels: On" : "Labels: Off", _worldTools.ShowLabels, false))
                 _worldTools.ShowLabels = !_worldTools.ShowLabels;
             GUILayout.EndHorizontal();
-            GUILayout.Label(_worldTools.Status, _labelStyle);
-
             GUILayout.Space(5f);
+            GUILayout.Label(_worldTools.Status, _labelStyle);
+            GUILayout.EndArea();
+        }
+
+        private void DrawTeleportsMenu()
+        {
+            EnsureStyles();
+            const int width = 360;
+            const int height = 560;
+            Rect outer = new Rect(_teleportsMenuPosition.x, _teleportsMenuPosition.y, width, height);
+            _lastTeleportsMenuRect = outer;
+            GUI.DrawTexture(new Rect(outer.x + 4f, outer.y + 5f, outer.width, outer.height), _outerShadowTexture, ScaleMode.StretchToFill);
+            GUI.DrawTexture(outer, _outerFrameTexture, ScaleMode.StretchToFill);
+            Rect title = new Rect(outer.x + OuterFramePadding, outer.y + OuterFramePadding, outer.width - OuterFramePadding * 2f, TitleBarHeight);
+            GUI.DrawTexture(title, _titleBarTexture, ScaleMode.StretchToFill);
+            GUI.Label(new Rect(title.x, title.y + 1f, title.width, title.height), "TELEPORTS", _titleShadowStyle);
+            GUI.Label(title, "TELEPORTS", _titleLabelStyle);
+            HandleDrag(title, ref _teleportsMenuPosition, ref _isDraggingTeleportsMenu, ref _dragOffsetTeleportsMenu);
+            Rect inner = new Rect(outer.x + OuterFramePadding, title.yMax + 4f, outer.width - OuterFramePadding * 2f, outer.height - TitleBarHeight - 14f);
+            GUI.DrawTexture(inner, _innerBackgroundTexture, ScaleMode.StretchToFill);
+            GUILayout.BeginArea(inner);
+            GUILayout.BeginHorizontal();
             GUILayout.Label("Custom coordinates (X, Y, Z)", _panelHeaderStyle);
+            GUILayout.FlexibleSpace();
+            Rect close = GUILayoutUtility.GetRect(58f, ActionButtonHeight, GUILayout.Width(58f));
+            if (DrawGoldButton(close, "Close", false, false)) _teleportsMenuOpen = false;
+            GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
             _customTeleportInput = GUILayout.TextField(_customTeleportInput ?? "", GUILayout.ExpandWidth(true));
             Rect go = GUILayoutUtility.GetRect(54f, ActionButtonHeight, GUILayout.Width(54f));
             if (DrawGoldButton(go, "Go", false, false)) _worldTools.TeleportToCoordinates(_customTeleportInput);
             GUILayout.EndHorizontal();
-
             GUILayout.Label("Saved destinations", _panelHeaderStyle);
-            _worldToolsMenuScroll = GUILayout.BeginScrollView(_worldToolsMenuScroll, GUILayout.Height(142f));
+            _teleportsMenuScroll = GUILayout.BeginScrollView(_teleportsMenuScroll, GUILayout.Height(142f));
             for (int i = 0; i < PlayerWorldTools.DestinationCount; i++)
             {
                 GUILayout.BeginHorizontal();
@@ -1639,7 +1665,6 @@ namespace TavernFun
                 GUILayout.Space(2f);
             }
             GUILayout.EndScrollView();
-
             GUILayout.BeginHorizontal();
             GUILayout.Label("Online players", _panelHeaderStyle);
             GUILayout.FlexibleSpace();
@@ -1659,6 +1684,7 @@ namespace TavernFun
                 GUILayout.EndHorizontal();
             }
             GUILayout.EndScrollView();
+            GUILayout.Label(_worldTools.Status, _labelStyle);
             GUILayout.EndArea();
         }
 
@@ -6943,6 +6969,61 @@ namespace TavernFun
             return TeleportLocalPlayer(new Vector3(x, y, z), "Teleported to custom coordinates.");
         }
 
+        private static object FindLocomotionController(PlayerController player)
+        {
+            try
+            {
+                object direct = player.LocomotionController;
+                if (HasMoveTo(direct)) return direct;
+            }
+            catch { }
+            object reflected = ReadMember(player, "LocomotionController");
+            if (HasMoveTo(reflected)) return reflected;
+            try
+            {
+                MonoBehaviour[] children = player.GetComponentsInChildren<MonoBehaviour>(true);
+                for (int i = 0; i < children.Length; i++)
+                {
+                    MonoBehaviour component = children[i];
+                    if (component != null && component.gameObject.activeInHierarchy
+                        && component.GetType().Name.IndexOf("Locomotion", StringComparison.OrdinalIgnoreCase) >= 0
+                        && HasMoveTo(component)) return component;
+                }
+                MonoBehaviour[] all = Object.FindObjectsOfType<MonoBehaviour>();
+                for (int i = 0; i < all.Length; i++)
+                {
+                    MonoBehaviour component = all[i];
+                    if (component == null || !component.gameObject.activeInHierarchy
+                        || component.GetType().Name.IndexOf("Locomotion", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    Component character = ReadMember(component, "Character") as Component;
+                    bool belongsToLocalPlayer = component.transform == player.transform
+                        || component.transform.IsChildOf(player.transform)
+                        || component.transform.root == player.transform.root
+                        || (character != null && (character.transform == player.transform || character.transform.root == player.transform.root));
+                    if (belongsToLocalPlayer && HasMoveTo(component)) return component;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static bool HasMoveTo(object candidate)
+        {
+            if (candidate == null) return false;
+            try
+            {
+                MethodInfo[] methods = candidate.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                for (int i = 0; i < methods.Length; i++)
+                {
+                    if (methods[i].Name != "MoveTo") continue;
+                    ParameterInfo[] parameters = methods[i].GetParameters();
+                    if ((parameters.Length == 1 || parameters.Length == 2) && parameters[0].ParameterType == typeof(Vector3)) return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
         private bool TeleportLocalPlayer(Vector3 position, string success)
         {
             PlayerController player = PlayerController.Current;
@@ -6951,10 +7032,10 @@ namespace TavernFun
                 _status = "Local player is not ready.";
                 return false;
             }
-            object locomotion = ReadMember(player, "LocomotionController");
+            object locomotion = FindLocomotionController(player);
             if (locomotion == null)
             {
-                _status = "Locomotion controller was not found.";
+                _status = "No local PlayerLocomotionController was found.";
                 return false;
             }
             try
