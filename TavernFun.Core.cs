@@ -10,7 +10,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
-using HarmonyLib;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.PostProcessing;
 using UnityEngine.SceneManagement;
@@ -30,12 +29,12 @@ namespace TavernFun
     // FlatscreenCore is just a plain class driven from here.
     public sealed class TavernFunMod : MelonMod
     {
-        private static readonly HarmonyLib.Harmony HarmonyInstance = new HarmonyLib.Harmony("Tavernfun.fizzjay");
+        private static readonly HarmonyLib.Harmony TavernFunHarmony = new HarmonyLib.Harmony("Tavernfun.fizzjay");
 
         public override void OnInitializeMelon()
         {
-            HarmonyInstance.PatchAll();
-            TavernFun.AmbienceSoundPatch.TryApply(HarmonyInstance);
+            TavernFunHarmony.PatchAll();
+            TavernFun.AmbienceSoundPatch.TryApply(TavernFunHarmony);
             _menu.Init();
         }
 

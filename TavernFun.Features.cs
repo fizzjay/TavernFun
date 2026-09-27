@@ -6632,7 +6632,8 @@ namespace TavernFun
         private float _arenaLastTime;
         private int _nextWarningTime;
         private float _nextApiResolveTime;
-        private PlayerEffectController _effectController;
+        private Component _effectController;
+        private Type _effectControllerType;
         private FieldInfo _remoteEffectField;
         private Type _teleportInfoType;
         private FieldInfo _teleportPositionField;
@@ -6730,16 +6731,36 @@ namespace TavernFun
 
         private void SpawnOtherPlayerPillars()
         {
-            HashSet<IPlayer> allPlayers = Player.AllPlayers;
+            object playerCollection = null;
+            try
+            {
+                PropertyInfo playersProperty = AccessTools.Property(typeof(Player), "AllPlayers");
+                if (playersProperty != null) playerCollection = playersProperty.GetValue(null, null);
+                else
+                {
+                    FieldInfo playersField = AccessTools.Field(typeof(Player), "AllPlayers");
+                    if (playersField != null) playerCollection = playersField.GetValue(null);
+                }
+            }
+            catch { }
+            IEnumerable allPlayers = playerCollection as IEnumerable;
             if (allPlayers == null) return;
             int playerCount = 0;
-            foreach (IPlayer other in allPlayers)
+            foreach (object other in allPlayers)
             {
-                if (other == null || other.IsLocalPlayer || other.PlayerController == null) continue;
-                if ((other.PlayerController.PlayerFeetPosition - _center).sqrMagnitude > 400f) continue;
-                Vector3 feet = other.PlayerController.PlayerFeetPosition;
-                for (float y = 0f; y <= 4f; y += 0.5f) SpawnEffect(feet + Vector3.up * y);
-                if (++playerCount >= 12) break;
+                if (other == null) continue;
+                try
+                {
+                    object localValue = ReadRuntimeMember(other, "IsLocalPlayer");
+                    if (localValue is bool && (bool)localValue) continue;
+                    PlayerController otherController = ReadRuntimeMember(other, "PlayerController") as PlayerController;
+                    if (otherController == null || otherController == PlayerController.Current) continue;
+                    Vector3 feet = otherController.PlayerFeetPosition;
+                    if ((feet - _center).sqrMagnitude > 400f) continue;
+                    for (float y = 0f; y <= 4f; y += 0.5f) SpawnEffect(feet + Vector3.up * y);
+                    if (++playerCount >= 12) break;
+                }
+                catch { }
             }
         }
 
@@ -6909,7 +6930,9 @@ namespace TavernFun
             {
                 PlayerController player = PlayerController.Current;
                 if (player == null) return;
-                PlayerEffectController controller = player.transform.GetComponent<PlayerEffectController>();
+                Type controllerType = ResolveEffectControllerType();
+                if (controllerType == null) return;
+                Component controller = player.GetComponent(controllerType) as Component;
                 if (controller == null) return;
                 if (!object.ReferenceEquals(_effectController, controller)
                     || (_sendToChunksMethod == null && Time.time >= _nextApiResolveTime))
@@ -6943,7 +6966,50 @@ namespace TavernFun
             }
         }
 
-        private void ResolveEffectApi(PlayerEffectController controller)
+        private Type ResolveEffectControllerType()
+        {
+            if (_effectControllerType != null) return _effectControllerType;
+            _effectControllerType = AccessTools.TypeByName("Alta.Character.PlayerEffectController")
+                ?? AccessTools.TypeByName("PlayerEffectController");
+            if (_effectControllerType != null && typeof(Component).IsAssignableFrom(_effectControllerType))
+                return _effectControllerType;
+            _effectControllerType = null;
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                Type[] types;
+                try { types = assemblies[i].GetTypes(); }
+                catch { continue; }
+                for (int j = 0; j < types.Length; j++)
+                {
+                    Type candidate = types[j];
+                    if (candidate != null && candidate.Name == "PlayerEffectController"
+                        && typeof(Component).IsAssignableFrom(candidate))
+                    {
+                        _effectControllerType = candidate;
+                        return _effectControllerType;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static object ReadRuntimeMember(object target, string name)
+        {
+            if (target == null) return null;
+            Type type = target.GetType();
+            try
+            {
+                PropertyInfo property = AccessTools.Property(type, name);
+                if (property != null) return property.GetValue(target, null);
+                FieldInfo field = AccessTools.Field(type, name);
+                if (field != null) return field.GetValue(target);
+            }
+            catch { }
+            return null;
+        }
+
+        private void ResolveEffectApi(Component controller)
         {
             _effectController = controller;
             Type componentType = controller.GetType();
