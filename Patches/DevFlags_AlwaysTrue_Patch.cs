@@ -2,8 +2,8 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 
-// Forces both dev/developer flags to always return true so dev-only features and
-// content are always accessible regardless of the account's actual status.
+// Optional developer-permission override. The Player > Dev Tools control toggles
+// Enabled; when false these patches preserve the game's actual permission values.
 //
 // IsDeveloper  – auto-property on ShopHelper (Alta.Api.DataTransferModels)
 // IsDev        – private-protected auto-property on the Player/Character class
@@ -15,6 +15,8 @@ using HarmonyLib;
 [HarmonyPatch]
 internal static class IsDeveloper_AlwaysTrue_Patch
 {
+    internal static bool Enabled;
+
     static MethodBase TargetMethod()
     {
         return FindGetter("IsDeveloper");
@@ -23,7 +25,8 @@ internal static class IsDeveloper_AlwaysTrue_Patch
     [HarmonyPostfix]
     static void Postfix(ref bool __result)
     {
-        __result = true;
+        if (IsDeveloper_AlwaysTrue_Patch.Enabled)
+            __result = true;
     }
 
     // Walk every loaded assembly to find a type that has a readable bool property
@@ -65,6 +68,7 @@ internal static class IsDev_AlwaysTrue_Patch
     [HarmonyPostfix]
     static void Postfix(ref bool __result)
     {
-        __result = true;
+        if (IsDeveloper_AlwaysTrue_Patch.Enabled)
+            __result = true;
     }
 }

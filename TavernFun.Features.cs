@@ -1,4 +1,4 @@
-﻿using Alta.Character;
+using Alta.Character;
 using Alta.Impact;
 using Alta.StatSystem;
 using HarmonyLib;
@@ -136,6 +136,12 @@ namespace TavernFun
         private readonly SuperFlyController _superFly = new SuperFlyController();
         private readonly HipMoveController _hipMove = new HipMoveController();
         private bool _fovMenuOpen;
+        private bool _devToolsMenuOpen;
+        private Vector2 _devToolsMenuPosition = new Vector2(360f, 200f);
+        private bool _isDraggingDevToolsMenu;
+        private Vector2 _dragOffsetDevToolsMenu;
+        private Rect _lastDevToolsMenuRect;
+        private readonly DevToolsController _devTools = new DevToolsController();
         private Vector2 _fovMenuPosition = new Vector2(360f, 40f);
         private Rect _lastFovMenuRect;
         private bool _isDraggingFovMenu;
@@ -235,7 +241,7 @@ namespace TavernFun
         public void Update()
         {
             if (_input.IsMenuTogglePressed) { IsVisible = !IsVisible; }
-            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen;
             _flatscreen.Tick();
             _weather.Tick();
             _graphics.Tick();
@@ -319,6 +325,10 @@ namespace TavernFun
                 {
                     DrawFovMenu();
                 }
+                if (_devToolsMenuOpen)
+                {
+                    DrawDevToolsMenu();
+                }
                 IsPointerOverUI = (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                                                 || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
                                                 || (_grabMenuOpen && _lastGrabMenuRect.Contains(mousePos))
@@ -330,8 +340,10 @@ namespace TavernFun
                                                 || (_fingerMenuOpen && _lastFingerMenuRect.Contains(mousePos))
                                                 || (_jeanGreyMenuOpen && _lastJeanGreyMenuRect.Contains(mousePos))
                                                 || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
-                                                || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos));
-                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen;
+                                                || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
+                                                || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos));
+                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen;
+                DevToolsDebugOverlay.Draw();
                 return;
             }
             EnsureStyles();
@@ -434,6 +446,10 @@ namespace TavernFun
             {
                 DrawFovMenu();
             }
+            if (_devToolsMenuOpen)
+            {
+                DrawDevToolsMenu();
+            }
             IsPointerOverUI = _lastMainRect.Contains(mousePos)
                             || (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                             || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
@@ -446,8 +462,10 @@ namespace TavernFun
                             || (_tpEffectsMenuOpen && _lastTpEffectsMenuRect.Contains(mousePos))
                             || (_jeanGreyMenuOpen && _lastJeanGreyMenuRect.Contains(mousePos))
                             || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
-                            || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos));
-            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen;
+                            || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
+                            || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos));
+            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen;
+            DevToolsDebugOverlay.Draw();
         }
 
         private void DrawTabs()
@@ -1520,6 +1538,10 @@ namespace TavernFun
                 _hipMove.Toggle(_flatscreen);
             }
             GUILayout.EndHorizontal();
+            GUILayout.Space(6f);
+            Rect devToolsRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(devToolsRect, "Dev Tools", _devToolsMenuOpen, false))
+                _devToolsMenuOpen = true;
         }
 
         private static Camera GetLocalPlayerCamera()
@@ -1531,6 +1553,45 @@ namespace TavernFun
             }
             catch { }
             return Camera.main;
+        }
+
+        private void DrawDevToolsMenu()
+        {
+            EnsureStyles();
+            const int width = 270;
+            const int height = 300;
+            Rect outer = new Rect(_devToolsMenuPosition.x, _devToolsMenuPosition.y, width, height);
+            _lastDevToolsMenuRect = outer;
+            GUI.DrawTexture(new Rect(outer.x + 4f, outer.y + 5f, outer.width, outer.height), _outerShadowTexture, ScaleMode.StretchToFill);
+            GUI.DrawTexture(outer, _outerFrameTexture, ScaleMode.StretchToFill);
+            Rect title = new Rect(outer.x + OuterFramePadding, outer.y + OuterFramePadding, outer.width - OuterFramePadding * 2f, TitleBarHeight);
+            GUI.DrawTexture(title, _titleBarTexture, ScaleMode.StretchToFill);
+            GUI.Label(new Rect(title.x, title.y + 1f, title.width, title.height), "DEV TOOLS", _titleShadowStyle);
+            GUI.Label(title, "DEV TOOLS", _titleLabelStyle);
+            HandleDrag(title, ref _devToolsMenuPosition, ref _isDraggingDevToolsMenu, ref _dragOffsetDevToolsMenu);
+            Rect inner = new Rect(outer.x + OuterFramePadding, title.yMax + 4f, outer.width - OuterFramePadding * 2f, outer.height - TitleBarHeight - 14f);
+            GUI.DrawTexture(inner, _innerBackgroundTexture, ScaleMode.StretchToFill);
+            GUILayout.BeginArea(inner);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(_devTools.Status, _labelStyle);
+            GUILayout.FlexibleSpace();
+            Rect close = GUILayoutUtility.GetRect(58f, ActionButtonHeight, GUILayout.Width(58f));
+            if (DrawGoldButton(close, "Close", false, false)) _devToolsMenuOpen = false;
+            GUILayout.EndHorizontal();
+            GUILayout.Space(4f);
+            DrawDevToolToggle("Dev Light", _devTools.DevLightEnabled, _devTools.ToggleDevLight);
+            DrawDevToolToggle("Force Debug Features", _devTools.ForceDebugEnabled, _devTools.ToggleForceDebug);
+            DrawDevToolToggle("Impact Hit Debug", _devTools.ImpactDebugEnabled, _devTools.ToggleImpactDebug);
+            DrawDevToolToggle("Damage Debug Overlay", _devTools.DamageOverlayEnabled, _devTools.ToggleDamageOverlay);
+            DrawDevToolToggle("Mod Mic Mute (self)", _devTools.MicMuteEnabled, _devTools.ToggleMicMute);
+            GUILayout.EndArea();
+        }
+
+        private void DrawDevToolToggle(string label, bool enabled, Action toggle)
+        {
+            Rect rect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.ExpandWidth(true));
+            if (DrawGoldButton(rect, label + (enabled ? ": On" : ": Off"), enabled, false)) toggle();
+            GUILayout.Space(4f);
         }
 
         private void DrawFovMenu()
@@ -6784,6 +6845,369 @@ namespace TavernFun
                     }
                 }
             }
+        }
+    }
+
+
+    internal sealed class DevToolsController
+    {
+        private object _playerLight;
+        private bool _devLightEnabled;
+        private bool _forceDebugEnabled;
+        private bool _impactDebugEnabled;
+        private bool _damageOverlayEnabled;
+        private readonly List<MicMuteBinding> _micBindings = new List<MicMuteBinding>();
+        private string _status = "Developer tools are off.";
+
+        internal bool DevLightEnabled { get { return _devLightEnabled; } }
+        internal bool ForceDebugEnabled { get { return _forceDebugEnabled; } }
+        internal bool ImpactDebugEnabled { get { return _impactDebugEnabled; } }
+        internal bool DamageOverlayEnabled { get { return _damageOverlayEnabled; } }
+        internal bool MicMuteEnabled { get; private set; }
+        internal string Status { get { return _status; } }
+        internal static bool DamageOverlayActive;
+
+        internal void ToggleDevLight()
+        {
+            bool enable = !_devLightEnabled;
+            if (enable && PlayerController.Current == null)
+            {
+                _status = "Dev Light: local player not ready.";
+                return;
+            }
+            if (enable)
+            {
+                _playerLight = GetMember(PlayerController.Current, "PlayerLight");
+                if (_playerLight == null)
+                {
+                    _status = "Dev Light: player light not found.";
+                    return;
+                }
+            }
+            ApplyPlayerLight(_playerLight, enable);
+            _devLightEnabled = enable;
+            _status = enable ? "Dev Light enabled." : "Dev Light disabled.";
+        }
+
+        private static void ApplyPlayerLight(object playerLight, bool enabled)
+        {
+            if (playerLight == null) return;
+            try
+            {
+                MethodInfo setter = playerLight.GetType().GetMethod("SetPlayerLightEnabled", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (setter != null) setter.Invoke(playerLight, new object[] { enabled });
+                FieldInfo field = AccessTools.Field(playerLight.GetType(), "platformLight");
+                object platformLight = field != null ? field.GetValue(playerLight) : null;
+                if (platformLight == null) return;
+                SetMember(platformLight, "IsActive", enabled);
+                SetMember(platformLight, "Range", 100f);
+                Behaviour behaviour = platformLight as Behaviour;
+                if (behaviour != null) behaviour.enabled = enabled;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning("Dev Light toggle failed: " + ex.GetBaseException().Message);
+            }
+        }
+
+        internal void ToggleForceDebug()
+        {
+            _forceDebugEnabled = !_forceDebugEnabled;
+            global::IsDeveloper_AlwaysTrue_Patch.Enabled = _forceDebugEnabled;
+            _status = _forceDebugEnabled ? "Developer permission override enabled." : "Developer permission override disabled.";
+        }
+
+        internal void ToggleImpactDebug()
+        {
+            if (!_impactDebugEnabled)
+            {
+                int patched = ImpactDebugHooks.Enable();
+                if (patched == 0)
+                {
+                    _status = "Impact debug handlers were not found in this game build.";
+                    return;
+                }
+                _impactDebugEnabled = true;
+                _status = "Impact debug enabled (" + patched + " handlers).";
+            }
+            else
+            {
+                _impactDebugEnabled = false;
+                ImpactDebugHooks.Disable();
+                _status = "Impact debug disabled.";
+            }
+        }
+
+        internal void ToggleDamageOverlay()
+        {
+            _damageOverlayEnabled = !_damageOverlayEnabled;
+            DamageOverlayActive = _damageOverlayEnabled;
+            _status = _damageOverlayEnabled ? "Damage debug overlay enabled." : "Damage debug overlay disabled.";
+        }
+
+        internal void ToggleMicMute()
+        {
+            if (MicMuteEnabled)
+            {
+                for (int i = 0; i < _micBindings.Count; i++) _micBindings[i].Restore();
+                _micBindings.Clear();
+                MicMuteEnabled = false;
+                _status = "Mod microphone unmuted.";
+                return;
+            }
+            _micBindings.Clear();
+            ScanMicMuteBindings();
+            if (_micBindings.Count == 0)
+            {
+                _status = "No local voice-mute control was found in this game build.";
+                return;
+            }
+            for (int i = 0; i < _micBindings.Count; i++) _micBindings[i].SetMuted(true);
+            MicMuteEnabled = true;
+            _status = "Mod microphone muted (" + _micBindings.Count + " controls).";
+        }
+
+        private void ScanMicMuteBindings()
+        {
+            const int maxBindings = 24;
+            MonoBehaviour[] components = Resources.FindObjectsOfTypeAll<MonoBehaviour>();
+            for (int i = 0; i < components.Length && _micBindings.Count < maxBindings; i++)
+            {
+                MonoBehaviour component = components[i];
+                if (component == null || !LooksLikeVoiceType(component.GetType())) continue;
+                AddVoiceBindings(component.GetType(), component, false, maxBindings);
+            }
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length && _micBindings.Count < maxBindings; i++)
+            {
+                Type[] types;
+                try { types = assemblies[i].GetTypes(); }
+                catch { continue; }
+                for (int j = 0; j < types.Length && _micBindings.Count < maxBindings; j++)
+                {
+                    Type type = types[j];
+                    if (type == null || !LooksLikeVoiceType(type)) continue;
+                    AddVoiceBindings(type, null, true, maxBindings);
+                }
+            }
+        }
+
+        private static bool LooksLikeVoiceType(Type type)
+        {
+            string name = (type.FullName ?? type.Name).ToLowerInvariant();
+            return name.Contains("voice") || name.Contains("microphone") || name.Contains("vivox") || name.Contains("dissonance");
+        }
+
+        private void AddVoiceBindings(Type type, object target, bool staticOnly, int maxBindings)
+        {
+            int existingForType = _micBindings.Count;
+            BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | (staticOnly ? BindingFlags.Static : BindingFlags.Instance);
+            foreach (FieldInfo field in type.GetFields(flags))
+            {
+                if (_micBindings.Count >= maxBindings) return;
+                if (field.FieldType != typeof(bool) || !IsMuteMember(field.Name)) continue;
+                try { _micBindings.Add(MicMuteBinding.ForField(target, field, (bool)field.GetValue(target))); }
+                catch { }
+            }
+            foreach (PropertyInfo property in type.GetProperties(flags))
+            {
+                if (_micBindings.Count >= maxBindings) return;
+                if (property.PropertyType != typeof(bool) || property.GetIndexParameters().Length != 0 || !IsMuteMember(property.Name)) continue;
+                MethodInfo setter = property.GetSetMethod(true);
+                MethodInfo getter = property.GetGetMethod(true);
+                if (setter == null || getter == null) continue;
+                try { _micBindings.Add(MicMuteBinding.ForProperty(target, property, (bool)getter.Invoke(target, null))); }
+                catch { }
+            }
+            if (_micBindings.Count > existingForType) return;
+            foreach (MethodInfo method in type.GetMethods(flags))
+            {
+                if (_micBindings.Count >= maxBindings) return;
+                ParameterInfo[] parameters = method.GetParameters();
+                string methodName = method.Name.ToLowerInvariant();
+                if (!methodName.Contains("mute") || methodName.Contains("unmute") || parameters.Length != 1 || parameters[0].ParameterType != typeof(bool)) continue;
+                if (method.IsSpecialName) continue;
+                _micBindings.Add(MicMuteBinding.ForMethod(target, method));
+            }
+        }
+
+        private static bool IsMuteMember(string name)
+        {
+            string value = name.ToLowerInvariant();
+            if (!value.Contains("mute") || value.Contains("unmute") || value.Contains("canmute") || value.Contains("allowmute") || value.Contains("supportsmute")) return false;
+            return value == "mute" || value == "muted" || value.EndsWith("mute") || value.EndsWith("muted") || value.Contains("muteenabled");
+        }
+
+        private sealed class MicMuteBinding
+        {
+            private object _target;
+            private MemberInfo _member;
+            private MethodInfo _method;
+            private bool _original;
+            private bool _hasOriginal;
+            private bool _isStatic;
+
+            internal static MicMuteBinding ForField(object target, FieldInfo field, bool original)
+            {
+                return new MicMuteBinding { _target = target, _member = field, _original = original, _hasOriginal = true, _isStatic = field.IsStatic };
+            }
+            internal static MicMuteBinding ForProperty(object target, PropertyInfo property, bool original)
+            {
+                MethodInfo accessor = property.GetSetMethod(true);
+                return new MicMuteBinding { _target = target, _member = property, _original = original, _hasOriginal = true, _isStatic = accessor.IsStatic };
+            }
+            internal static MicMuteBinding ForMethod(object target, MethodInfo method)
+            {
+                // Boolean mutator methods are assumed to default to unmuted; this lets
+                // the off toggle undo a method-only binding when no readable state exists.
+                return new MicMuteBinding { _target = target, _method = method, _original = false, _hasOriginal = true, _isStatic = method.IsStatic };
+            }
+            internal void SetMuted(bool muted)
+            {
+                try
+                {
+                    if (_method != null) _method.Invoke(_isStatic ? null : _target, new object[] { muted });
+                    else if (_member is FieldInfo) ((FieldInfo)_member).SetValue(_isStatic ? null : _target, muted);
+                    else if (_member is PropertyInfo) ((PropertyInfo)_member).GetSetMethod(true).Invoke(_isStatic ? null : _target, new object[] { muted });
+                }
+                catch { }
+            }
+            internal void Restore()
+            {
+                if (_hasOriginal) SetMuted(_original);
+                else SetMuted(false);
+            }
+        }
+
+        private static object GetMember(object target, string name)
+        {
+            if (target == null) return null;
+            Type type = target.GetType();
+            PropertyInfo property = AccessTools.Property(type, name);
+            if (property != null)
+            {
+                try { return property.GetValue(target, null); } catch { }
+            }
+            FieldInfo field = AccessTools.Field(type, name);
+            if (field != null)
+            {
+                try { return field.GetValue(target); } catch { }
+            }
+            return null;
+        }
+
+        private static void SetMember(object target, string name, object value)
+        {
+            if (target == null) return;
+            Type type = target.GetType();
+            PropertyInfo property = AccessTools.Property(type, name);
+            if (property != null && property.CanWrite)
+            {
+                try { property.SetValue(target, Convert.ChangeType(value, property.PropertyType), null); return; } catch { }
+            }
+            FieldInfo field = AccessTools.Field(type, name);
+            if (field != null)
+            {
+                try { field.SetValue(target, Convert.ChangeType(value, field.FieldType)); } catch { }
+            }
+        }
+    }
+
+    internal static class DevToolsDebugOverlay
+    {
+        private static readonly List<string> Lines = new List<string>();
+        internal static void Record(string line)
+        {
+            string text = Time.realtimeSinceStartup.ToString("0.0") + "  " + line;
+            Lines.Add(text);
+            if (Lines.Count > 8) Lines.RemoveAt(0);
+        }
+        internal static void Draw()
+        {
+            if (!DevToolsController.DamageOverlayActive && !ImpactDebugHooks.Enabled) return;
+            Rect box = new Rect(Screen.width - 365f, Screen.height - 180f, 355f, 170f);
+            GUI.Box(box, "DEV DEBUG OUTPUT");
+            int start = Mathf.Max(0, Lines.Count - 7);
+            for (int i = start; i < Lines.Count; i++)
+                GUI.Label(new Rect(box.x + 8f, box.y + 25f + (i - start) * 17f, box.width - 16f, 18f), Lines[i]);
+        }
+    }
+
+    [HarmonyPatch]
+    internal static class DevToolsDamageDebugPatch
+    {
+        private static MethodBase TargetMethod()
+        {
+            return AccessTools.Method(typeof(HealthObject), "ReceiveDamage", new Type[] { typeof(float), typeof(float), typeof(DamageData) });
+        }
+        private static void Prefix(object __instance, object[] __args)
+        {
+            if (!DevToolsController.DamageOverlayActive) return;
+            try
+            {
+                Component component = __instance as Component;
+                string target = component != null ? component.gameObject.name : "HealthObject";
+                string amount = __args != null && __args.Length > 0 ? Convert.ToString(__args[0]) : "?";
+                string source = __args != null && __args.Length > 2 ? Convert.ToString(__args[2]) : "unknown source";
+                DevToolsDebugOverlay.Record("Damage " + amount + " -> " + target + " (" + source + ")");
+            }
+            catch { }
+        }
+    }
+
+    internal static class ImpactDebugHooks
+    {
+        private static HarmonyLib.Harmony _harmony;
+        internal static bool Enabled { get; private set; }
+        private static int _patchedCount;
+
+        internal static int Enable()
+        {
+            if (_harmony == null) _harmony = new HarmonyLib.Harmony("TavernFun.DevTools.ImpactDebug");
+            if (_patchedCount == 0) _patchedCount = ScanAndPatch();
+            Enabled = _patchedCount > 0;
+            return _patchedCount;
+        }
+        internal static void Disable() { Enabled = false; }
+
+        private static int ScanAndPatch()
+        {
+            int patched = 0;
+            MethodInfo prefix = typeof(ImpactDebugHooks).GetMethod("Prefix", BindingFlags.Static | BindingFlags.NonPublic);
+            HarmonyMethod patch = new HarmonyMethod(prefix);
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length && patched < 16; i++)
+            {
+                Type[] types;
+                try { types = assemblies[i].GetTypes(); } catch { continue; }
+                for (int j = 0; j < types.Length && patched < 16; j++)
+                {
+                    Type type = types[j];
+                    if (type == null || type.Namespace == null || !type.Namespace.StartsWith("Alta.Impact", StringComparison.Ordinal)) continue;
+                    MethodInfo[] methods;
+                    try { methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly); }
+                    catch { continue; }
+                    for (int k = 0; k < methods.Length && patched < 16; k++)
+                    {
+                        MethodInfo method = methods[k];
+                        string name = method.Name.ToLowerInvariant();
+                        if (!name.Contains("impact") || !(name.Contains("hit") || name.Contains("apply") || name.Contains("handle") || name.Contains("collision")) || method.IsAbstract || method.IsGenericMethodDefinition) continue;
+                        try { _harmony.Patch(method, prefix: patch); patched++; } catch { }
+                    }
+                }
+            }
+            return patched;
+        }
+
+        private static void Prefix(MethodBase __originalMethod, object[] __args)
+        {
+            if (!Enabled) return;
+            try
+            {
+                string detail = __args == null || __args.Length == 0 ? "" : " [" + string.Join(", ", Array.ConvertAll(__args, arg => arg == null ? "null" : arg.ToString())) + "]";
+                DevToolsDebugOverlay.Record("Impact " + __originalMethod.DeclaringType.Name + "." + __originalMethod.Name + detail);
+            }
+            catch { }
         }
     }
 
