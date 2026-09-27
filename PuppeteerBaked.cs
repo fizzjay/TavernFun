@@ -92,25 +92,24 @@ namespace TownshipPuppeteer
 
         public static void Toggle()
         {
-            TownshipPuppeteer.UI.UIManager ui = TownshipPuppeteer.UI.UIManager;
-            if (ui.UiBase == null)
+            if (TownshipPuppeteer.UI.UIManager.UiBase == null)
             {
                 // UniverseLib initialises a few seconds after game start - nothing
                 // to toggle until it has.
                 MelonLogger.Msg("[Puppet] Menu isn't ready yet, try the button again in a few seconds.");
                 return;
             }
-            if (ui.MenuPanel == null)
+            if (TownshipPuppeteer.UI.UIManager.MenuPanel == null)
             {
-                ui.CreateMenu();
+                TownshipPuppeteer.UI.UIManager.CreateMenu();
             }
             if (IsOpen)
             {
-                ui.HideMenu();
+                TownshipPuppeteer.UI.UIManager.HideMenu();
             }
             else
             {
-                ui.ShowMenu();
+                TownshipPuppeteer.UI.UIManager.ShowMenu();
             }
         }
     }
@@ -382,7 +381,7 @@ namespace TownshipPuppeteer.UI
             joinBtn.OnClick = (Action)Delegate.Combine(joinBtn.OnClick, new Action(delegate()
             {
                 InputFieldRef serverInput = MenuPanel.ServerInput;
-                int serverIdentifier;
+                int serverIdentifier = 0;
                 bool flag = ((serverInput != null) ? serverInput.Text : null) != null && int.TryParse(MenuPanel.ServerInput.Text, out serverIdentifier);
                 if (flag)
                 {
@@ -420,7 +419,7 @@ namespace TownshipPuppeteer.UI
                             bool flag5 = Camera.main != null;
                             if (flag5)
                             {
-                                sourceEngineMovement.playerView = PlayerController.Current.gameObject.transform.FindChild("Height Fixer").transform.FindChild("VR Head (eye)").transform;
+                                sourceEngineMovement.playerView = PlayerController.Current.gameObject.transform.Find("Height Fixer").transform.Find("VR Head (eye)").transform;
                             }
                             sourceEngineMovement.ToggleMovement(true);
                         }
@@ -496,7 +495,7 @@ namespace TownshipPuppeteer.UI
         {
             UIManager.UiBase = UniversalUI.RegisterUI("TPUI.Merely", new Action(UIManager.UiUpdate));
             UIManager.CreateMenu();
-            UIManager.LogHandler("Menu Created", 3);
+            UIManager.LogHandler("Menu Created", LogType.Log);
             TownshipPuppeteerV2.Core.Loaded = true;
 
             // The original attached this extra "Rotate Full Body: ..." toast in
@@ -553,7 +552,7 @@ namespace TownshipPuppeteerHeightKeys
     {
         public override void OnInitializeMelon()
         {
-            this._harmony = new Harmony("TownshipPuppeteerHeightKeys.RGrab");
+            this._harmony = new HarmonyLib.Harmony("TownshipPuppeteerHeightKeys.RGrab");
             this.TryResolvePanKakeState();
             this.TryPatchRGrabHooks();
         }
@@ -810,7 +809,7 @@ namespace TownshipPuppeteerHeightKeys
         private void ApplyCursorState(bool locked)
         {
             Cursor.visible = !locked;
-            Cursor.lockState = (locked ? 1 : 0);
+            Cursor.lockState = locked ? CursorLockMode.Locked : CursorLockMode.None;
         }
 
         private void ProcessLeftHandHoldGrab(Keyboard keyboard, bool panKakeEnabled)
@@ -988,7 +987,7 @@ namespace TownshipPuppeteerHeightKeys
                 bool flag = playerMessageDisplay2 != null;
                 if (flag)
                 {
-                    playerMessageDisplay2.Display(text, duration, 2);
+                    playerMessageDisplay2.Display(text, duration, (DisplayMessageType)2);
                 }
             }
             catch
@@ -1006,7 +1005,7 @@ namespace TownshipPuppeteerHeightKeys
 
         private PlayerAdjustableHeightFixerSettings _heightSettings;
 
-        private Harmony _harmony;
+        private HarmonyLib.Harmony _harmony;
 
         private Component _activeLeftHandPickup;
 
@@ -1024,13 +1023,13 @@ namespace TownshipPuppeteerV2
 {
     public class Core : MelonMod
     {
-        public override void OnApplicationStart()
+        public override void OnInitializeMelon()
         {
             bool flag = !Core.initialized;
             if (flag)
             {
                 TownshipPuppeteer.UI.UIManager.Initialize();
-                TownshipPuppeteer.UI.UIManager.LogHandler("UI Initialized", 3);
+                TownshipPuppeteer.UI.UIManager.LogHandler("UI Initialized", LogType.Log);
                 Core.initialized = true;
                 Core.Loaded = true;
                 // The extra "Rotate Full Body: ..." toast used to be attached here,
@@ -1123,7 +1122,7 @@ namespace TownshipPuppeteerV2
             if (flag)
             {
                 Core.CheckSmoothLoco();
-                Core.ReadCMQMenu().Display(text, duration, 2);
+                Core.ReadCMQMenu().Display(text, duration, (DisplayMessageType)2);
             }
         }
 
@@ -1133,7 +1132,7 @@ namespace TownshipPuppeteerV2
             if (wasReleasedThisFrame)
             {
                 TownshipPuppeteer.UI.UIManager.ShowMenu();
-                TownshipPuppeteer.UI.UIManager.LogHandler("Menu Shown", 3);
+                TownshipPuppeteer.UI.UIManager.LogHandler("Menu Shown", LogType.Log);
             }
             bool wasReleasedThisFrame2 = Keyboard.current.fKey.wasReleasedThisFrame;
             if (wasReleasedThisFrame2)
@@ -1711,12 +1710,12 @@ namespace TownshipPuppeteerV2
                     PlayerController playerController = PlayerController.Current;
                     this.SetCameraPosition(playerController);
                     this.SetControllerPositions(playerController);
-                    UIManager.LogHandler("PanKake setup completed successfully.", 3);
+                    UIManager.LogHandler("PanKake setup completed successfully.", LogType.Log);
                 }
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error in Setup: " + ex.Message, 0);
+                UIManager.LogHandler("Error in Setup: " + ex.Message, LogType.Error);
             }
         }
 
@@ -1737,10 +1736,10 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error in Update: " + ex.Message, 0);
+                UIManager.LogHandler("Error in Update: " + ex.Message, LogType.Error);
                 if (this._lastFrameValid)
                 {
-                    UIManager.LogHandler("PanKake movement temporarily disabled due to error.", 2);
+                    UIManager.LogHandler("PanKake movement temporarily disabled due to error.", LogType.Warning);
                 }
                 this._lastFrameValid = false;
             }
@@ -1778,7 +1777,7 @@ namespace TownshipPuppeteerV2
             {
                 if (logErrors)
                 {
-                    UIManager.LogHandler("PlayerController.Current is null in " + context + ".", 0);
+                    UIManager.LogHandler("PlayerController.Current is null in " + context + ".", LogType.Error);
                 }
                 return false;
             }
@@ -1794,16 +1793,16 @@ namespace TownshipPuppeteerV2
                 if (transform != null)
                 {
                     transform.localPosition = new Vector3(0f, 1.45f, 0f);
-                    UIManager.LogHandler("Camera position set.", 3);
+                    UIManager.LogHandler("Camera position set.", LogType.Log);
                 }
                 else
                 {
-                    UIManager.LogHandler("Camera transform is null.", 2);
+                    UIManager.LogHandler("Camera transform is null.", LogType.Warning);
                 }
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error setting camera position: " + ex.Message, 0);
+                UIManager.LogHandler("Error setting camera position: " + ex.Message, LogType.Error);
             }
         }
 
@@ -1818,7 +1817,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error setting controller positions: " + ex.Message, 0);
+                UIManager.LogHandler("Error setting controller positions: " + ex.Message, LogType.Error);
             }
         }
 
@@ -1828,11 +1827,11 @@ namespace TownshipPuppeteerV2
             {
                 controllerTransform.localPosition = position;
                 controllerTransform.localRotation = Quaternion.Euler(298.5f, 0f, 0f);
-                UIManager.LogHandler(side + " controller position and rotation set.", 3);
+                UIManager.LogHandler(side + " controller position and rotation set.", LogType.Log);
             }
             else
             {
-                UIManager.LogHandler(side + " controller transform is null.", 2);
+                UIManager.LogHandler(side + " controller transform is null.", LogType.Warning);
             }
         }
 
@@ -1854,7 +1853,7 @@ namespace TownshipPuppeteerV2
                 }
                 catch (Exception ex)
                 {
-                    UIManager.LogHandler("Error in gamepad input: " + ex.Message, 0);
+                    UIManager.LogHandler("Error in gamepad input: " + ex.Message, LogType.Error);
                 }
             }
         }
@@ -1940,7 +1939,7 @@ namespace TownshipPuppeteerV2
                     }
                     catch (Exception ex)
                     {
-                        UIManager.LogHandler("Error in keyboard input: " + ex.Message, 0);
+                        UIManager.LogHandler("Error in keyboard input: " + ex.Message, LogType.Error);
                     }
                 }
             }
@@ -1952,28 +1951,28 @@ namespace TownshipPuppeteerV2
         private void ProcessMovementInput(Transform transform)
         {
             float num = this.CalculateMoveSpeed();
-            if (this.IsKeyPressed(61) || this.IsKeyPressed(15))
+            if (this.IsKeyPressed((Key)61) || this.IsKeyPressed((Key)15))
             {
                 transform.position += transform.right * -1f * num;
             }
-            if (this.IsKeyPressed(62) || this.IsKeyPressed(18))
+            if (this.IsKeyPressed((Key)62) || this.IsKeyPressed((Key)18))
             {
                 transform.position += transform.right * num;
             }
-            if (this.IsKeyPressed(63) || this.IsKeyPressed(37))
+            if (this.IsKeyPressed((Key)63) || this.IsKeyPressed((Key)37))
             {
                 transform.position += transform.forward * num;
             }
-            if (this.IsKeyPressed(64) || this.IsKeyPressed(33))
+            if (this.IsKeyPressed((Key)64) || this.IsKeyPressed((Key)33))
             {
                 transform.position += transform.forward * -1f * num;
             }
             bool isFlightModeEnabled = this.IsFlightModeEnabled();
-            if ((this.IsKeyPressed(1) || this.IsKeyPressed(67)) && isFlightModeEnabled)
+            if ((this.IsKeyPressed((Key)1) || this.IsKeyPressed((Key)67)) && isFlightModeEnabled)
             {
                 transform.position += transform.up * num;
             }
-            if ((this.IsKeyPressed(55) || this.IsKeyPressed(66)) && isFlightModeEnabled)
+            if ((this.IsKeyPressed((Key)55) || this.IsKeyPressed((Key)66)) && isFlightModeEnabled)
             {
                 transform.position += transform.up * -1f * num;
             }
@@ -2075,7 +2074,7 @@ namespace TownshipPuppeteerV2
                     Transform transform = (camera != null) ? camera.transform : null;
                     if (transform == null)
                     {
-                        UIManager.LogHandler("Camera transform is null during mouse click.", 2);
+                        UIManager.LogHandler("Camera transform is null during mouse click.", LogType.Warning);
                     }
                     else
                     {
@@ -2091,7 +2090,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error in mouse click: " + ex.Message, 0);
+                UIManager.LogHandler("Error in mouse click: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2109,7 +2108,7 @@ namespace TownshipPuppeteerV2
                     GameObject gameObject = (transform != null) ? transform.gameObject : null;
                     if (gameObject != null)
                     {
-                        UIManager.LogHandler("Hit object: " + gameObject.name, 3);
+                        UIManager.LogHandler("Hit object: " + gameObject.name, LogType.Log);
                         Interactable component = gameObject.GetComponent<Interactable>();
                         if (component != null && player.GetComponentInChildren<Interactable>() == null)
                         {
@@ -2121,7 +2120,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error processing raycast hits: " + ex.Message, 0);
+                UIManager.LogHandler("Error processing raycast hits: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2135,12 +2134,12 @@ namespace TownshipPuppeteerV2
                 {
                     interactor.ResetTimeout();
                     interactor.StartInteract(interactable, false, false, false);
-                    UIManager.LogHandler("Started interaction with: " + interactable.name, 3);
+                    UIManager.LogHandler("Started interaction with: " + interactable.name, LogType.Log);
                 }
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error starting interaction: " + ex.Message, 0);
+                UIManager.LogHandler("Error starting interaction: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2155,13 +2154,13 @@ namespace TownshipPuppeteerV2
                     if (interactor != null)
                     {
                         interactor.StopInteract(true, true);
-                        UIManager.LogHandler("Stopped interaction.", 3);
+                        UIManager.LogHandler("Stopped interaction.", LogType.Log);
                     }
                 }
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error stopping interaction: " + ex.Message, 0);
+                UIManager.LogHandler("Error stopping interaction: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2185,7 +2184,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error in mouse look: " + ex.Message, 0);
+                UIManager.LogHandler("Error in mouse look: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2246,7 +2245,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error toggling environment: " + ex.Message, 0);
+                UIManager.LogHandler("Error toggling environment: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2259,7 +2258,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error activating third person: " + ex.Message, 0);
+                UIManager.LogHandler("Error activating third person: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2277,7 +2276,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error toggling flight: " + ex.Message, 0);
+                UIManager.LogHandler("Error toggling flight: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2295,7 +2294,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error toggling debug light: " + ex.Message, 0);
+                UIManager.LogHandler("Error toggling debug light: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2307,7 +2306,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error in GrabAll: " + ex.Message, 0);
+                UIManager.LogHandler("Error in GrabAll: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2319,7 +2318,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error in GrabBags: " + ex.Message, 0);
+                UIManager.LogHandler("Error in GrabBags: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2331,7 +2330,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error in GrabCoins: " + ex.Message, 0);
+                UIManager.LogHandler("Error in GrabCoins: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2340,7 +2339,7 @@ namespace TownshipPuppeteerV2
             GameObject gameObject = GameObject.Find("Environment");
             if (gameObject == null)
             {
-                UIManager.LogHandler("Environment object not found.", 2);
+                UIManager.LogHandler("Environment object not found.", LogType.Warning);
             }
             else if (!MenuPanel.toggledEnvironment)
             {
@@ -2388,7 +2387,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error toggling crouch: " + ex.Message, 0);
+                UIManager.LogHandler("Error toggling crouch: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2401,7 +2400,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error adjusting sprint speed: " + ex.Message, 0);
+                UIManager.LogHandler("Error adjusting sprint speed: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2414,7 +2413,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error resetting sprint speed: " + ex.Message, 0);
+                UIManager.LogHandler("Error resetting sprint speed: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2435,7 +2434,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error adjusting FOV: " + ex.Message, 0);
+                UIManager.LogHandler("Error adjusting FOV: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2459,7 +2458,7 @@ namespace TownshipPuppeteerV2
                 }
                 catch (Exception ex)
                 {
-                    UIManager.LogHandler("Error in GrabAll: " + ex.Message, 0);
+                    UIManager.LogHandler("Error in GrabAll: " + ex.Message, LogType.Error);
                 }
             }
         }
@@ -2490,7 +2489,7 @@ namespace TownshipPuppeteerV2
                             }
                             catch (Exception ex)
                             {
-                                UIManager.LogHandler("Error interacting with " + gameObject.name + ": " + ex.Message, 2);
+                                UIManager.LogHandler("Error interacting with " + gameObject.name + ": " + ex.Message, LogType.Warning);
                             }
                         }
                     }
@@ -2498,7 +2497,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error processing interactables: " + ex.Message, 0);
+                UIManager.LogHandler("Error processing interactables: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2525,7 +2524,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error picking up " + ((obj != null) ? obj.name : null) + ": " + ex.Message, 2);
+                UIManager.LogHandler("Error picking up " + ((obj != null) ? obj.name : null) + ": " + ex.Message, LogType.Warning);
             }
             return false;
         }
@@ -2549,7 +2548,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error grabbing " + objName + "s: " + ex.Message, 0);
+                UIManager.LogHandler("Error grabbing " + objName + "s: " + ex.Message, LogType.Error);
             }
         }
 
@@ -2565,7 +2564,7 @@ namespace TownshipPuppeteerV2
             Interactor interactor = (rightController != null) ? rightController.Interactor : null;
             if (interactor == null)
             {
-                UIManager.LogHandler("Interactor is null in GrabObjectsByName.", 0);
+                UIManager.LogHandler("Interactor is null in GrabObjectsByName.", LogType.Error);
                 return;
             }
             HashSet<GameObject> processed = new HashSet<GameObject>();
@@ -2604,7 +2603,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error in GrabObjectsByName for " + objName + ": " + ex.Message, 0);
+                UIManager.LogHandler("Error in GrabObjectsByName for " + objName + ": " + ex.Message, LogType.Error);
             }
         }
 
@@ -2621,7 +2620,7 @@ namespace TownshipPuppeteerV2
             }
             catch (Exception ex)
             {
-                UIManager.LogHandler("Error interacting with object: " + ex.Message, 2);
+                UIManager.LogHandler("Error interacting with object: " + ex.Message, LogType.Warning);
             }
         }
     }
@@ -3028,7 +3027,7 @@ namespace TownshipPuppeteerV2
     {
         private static bool Prefix(ref Status.StatusPlatform __result)
         {
-            __result = 2;
+            __result = (Status.StatusPlatform)2;
             return false;
         }
     }
