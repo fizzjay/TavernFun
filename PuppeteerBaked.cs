@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 //  PuppeteerBaked.cs
 //
 //  The complete "Township Puppeteer" (a.k.a. the Puppet menu) baked straight
@@ -51,6 +51,12 @@
 //  you already use.
 // ============================================================================
 
+using Alta.Api.Client.HighLevel;
+using Alta.PlatformInformation;
+using Alta.Utilities;
+using HarmonyLib;
+using IKVM.Reflection;
+using MelonLoader;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -59,11 +65,6 @@ using System.Reflection;
 using System.Threading.Tasks;
 using TownshipPuppeteer.UI;
 using TownshipPuppeteerV2;
-using Alta.Api.Client.HighLevel;
-using Alta.PlatformInformation;
-using Alta.Utilities;
-using HarmonyLib;
-using MelonLoader;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
@@ -74,7 +75,13 @@ using UniverseLib.UI;
 using UniverseLib.UI.Models;
 using UniverseLib.UI.Panels;
 using Object = UnityEngine.Object;
-
+using Type = System.Type;
+using PropertyInfo = System.Reflection.PropertyInfo;
+using FieldInfo = System.Reflection.FieldInfo;
+using MethodInfo = System.Reflection.MethodInfo;
+using BindingFlags = System.Reflection.BindingFlags;
+using Assembly = System.Reflection.Assembly;
+using Universe = UniverseLib.Universe;
 namespace TownshipPuppeteer
 {
     // Tiny bridge so TavernFun's own IMGUI menu can open/close the Puppet menu.
@@ -270,7 +277,7 @@ namespace TownshipPuppeteer.UI
             MenuPanel.LeaveBtn = UIFactory.CreateButton(base.ContentRoot, "Leave", "Leave", new Color?(new Color(0.15f, 0.15f, 0.15f, 1f)));
             UIFactory.SetLayoutElement(MenuPanel.LeaveBtn.GameObject, new int?(200), new int?(25), null, null, null, null, null);
             ButtonRef toggleAmbience = MenuPanel.ToggleAmbience;
-            toggleAmbience.OnClick = (Action)Delegate.Combine(toggleAmbience.OnClick, new Action(delegate()
+            toggleAmbience.OnClick = (Action)Delegate.Combine(toggleAmbience.OnClick, new Action(delegate ()
             {
                 try
                 {
@@ -282,7 +289,7 @@ namespace TownshipPuppeteer.UI
                 }
             }));
             ButtonRef setFOV = MenuPanel.SetFOV;
-            setFOV.OnClick = (Action)Delegate.Combine(setFOV.OnClick, new Action(delegate()
+            setFOV.OnClick = (Action)Delegate.Combine(setFOV.OnClick, new Action(delegate ()
             {
                 try
                 {
@@ -298,17 +305,17 @@ namespace TownshipPuppeteer.UI
                 }
             }));
             ButtonRef thirdPerson = MenuPanel.ThirdPerson;
-            thirdPerson.OnClick = (Action)Delegate.Combine(thirdPerson.OnClick, new Action(delegate()
+            thirdPerson.OnClick = (Action)Delegate.Combine(thirdPerson.OnClick, new Action(delegate ()
             {
                 TownshipPuppeteerV2.Core.activateThirdPerson = true;
             }));
             ButtonRef buttonRef = MenuPanel.RotateWholeBody;
-            buttonRef.OnClick = (Action)Delegate.Combine(buttonRef.OnClick, new Action(delegate()
+            buttonRef.OnClick = (Action)Delegate.Combine(buttonRef.OnClick, new Action(delegate ()
             {
                 MenuPanel.rotateWholeBody = !MenuPanel.rotateWholeBody;
             }));
             ButtonRef fbbtn = MenuPanel.FBBtn;
-            fbbtn.OnClick = (Action)Delegate.Combine(fbbtn.OnClick, new Action(delegate()
+            fbbtn.OnClick = (Action)Delegate.Combine(fbbtn.OnClick, new Action(delegate ()
             {
                 bool flag = TownshipPuppeteerV2.Core.GhostHandCE != null;
                 if (flag)
@@ -321,7 +328,7 @@ namespace TownshipPuppeteer.UI
                 }
             }));
             ButtonRef flyBtn = MenuPanel.FlyBtn;
-            flyBtn.OnClick = (Action)Delegate.Combine(flyBtn.OnClick, new Action(delegate()
+            flyBtn.OnClick = (Action)Delegate.Combine(flyBtn.OnClick, new Action(delegate ()
             {
                 GameObject smoothLoco = TownshipPuppeteerV2.Core.SmoothLoco;
                 if (smoothLoco != null)
@@ -334,22 +341,22 @@ namespace TownshipPuppeteer.UI
                 }
             }));
             ButtonRef yoinkBtn = MenuPanel.YoinkBtn;
-            yoinkBtn.OnClick = (Action)Delegate.Combine(yoinkBtn.OnClick, new Action(delegate()
+            yoinkBtn.OnClick = (Action)Delegate.Combine(yoinkBtn.OnClick, new Action(delegate ()
             {
                 TownshipPuppeteerV2.Core.GrabAll();
             }));
             ButtonRef yoinkBagsBtn = MenuPanel.YoinkBagsBtn;
-            yoinkBagsBtn.OnClick = (Action)Delegate.Combine(yoinkBagsBtn.OnClick, new Action(delegate()
+            yoinkBagsBtn.OnClick = (Action)Delegate.Combine(yoinkBagsBtn.OnClick, new Action(delegate ()
             {
                 TownshipPuppeteerV2.Core.GrabBags();
             }));
             ButtonRef yoinkCoinBtn = MenuPanel.YoinkCoinBtn;
-            yoinkCoinBtn.OnClick = (Action)Delegate.Combine(yoinkCoinBtn.OnClick, new Action(delegate()
+            yoinkCoinBtn.OnClick = (Action)Delegate.Combine(yoinkCoinBtn.OnClick, new Action(delegate ()
             {
                 TownshipPuppeteerV2.Core.GrabCoins();
             }));
             ButtonRef freeCBtn = MenuPanel.FreeCBtn;
-            freeCBtn.OnClick = (Action)Delegate.Combine(freeCBtn.OnClick, new Action(delegate()
+            freeCBtn.OnClick = (Action)Delegate.Combine(freeCBtn.OnClick, new Action(delegate ()
             {
                 bool flag = MenuPanel.inSEMMode;
                 if (flag)
@@ -378,7 +385,7 @@ namespace TownshipPuppeteer.UI
                 }
             }));
             ButtonRef joinBtn = MenuPanel.JoinBtn;
-            joinBtn.OnClick = (Action)Delegate.Combine(joinBtn.OnClick, new Action(delegate()
+            joinBtn.OnClick = (Action)Delegate.Combine(joinBtn.OnClick, new Action(delegate ()
             {
                 InputFieldRef serverInput = MenuPanel.ServerInput;
                 int serverIdentifier = 0;
@@ -389,12 +396,12 @@ namespace TownshipPuppeteer.UI
                 }
             }));
             ButtonRef leaveBtn = MenuPanel.LeaveBtn;
-            leaveBtn.OnClick = (Action)Delegate.Combine(leaveBtn.OnClick, new Action(delegate()
+            leaveBtn.OnClick = (Action)Delegate.Combine(leaveBtn.OnClick, new Action(delegate ()
             {
                 TownshipPuppeteerV2.Core.LeaveServer();
             }));
             ButtonRef sembtn = MenuPanel.SEMBtn;
-            sembtn.OnClick = (Action)Delegate.Combine(sembtn.OnClick, new Action(delegate()
+            sembtn.OnClick = (Action)Delegate.Combine(sembtn.OnClick, new Action(delegate ()
             {
                 bool flag = MenuPanel.inPanKakeMode;
                 if (flag)
@@ -505,7 +512,7 @@ namespace TownshipPuppeteer.UI
             ButtonRef rotateWholeBody = MenuPanel.RotateWholeBody;
             if (rotateWholeBody != null)
             {
-                rotateWholeBody.OnClick = (Action)Delegate.Combine(rotateWholeBody.OnClick, new Action(delegate()
+                rotateWholeBody.OnClick = (Action)Delegate.Combine(rotateWholeBody.OnClick, new Action(delegate ()
                 {
                     TownshipPuppeteerV2.Core.PlayerMessage(string.Format("Rotate Full Body: {0}", MenuPanel.rotateWholeBody), 0.6f);
                 }));
@@ -2098,7 +2105,7 @@ namespace TownshipPuppeteerV2
         {
             try
             {
-                Array.Sort<RaycastHit>(hits, delegate(RaycastHit a, RaycastHit b)
+                Array.Sort<RaycastHit>(hits, delegate (RaycastHit a, RaycastHit b)
                 {
                     return a.distance.CompareTo(b.distance);
                 });
