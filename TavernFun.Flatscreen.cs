@@ -1368,17 +1368,21 @@ namespace TavernFun
             }
         }
 
-        private static int GetAvatarRenderLayers(Transform playerRoot)
+        private int GetAvatarRenderLayers(Transform playerRoot)
         {
             if (playerRoot == null) return 0;
-            int layers = 1 << playerRoot.gameObject.layer;
-            Renderer[] renderers = playerRoot.GetComponentsInChildren<Renderer>(true);
-            for (int i = 0; i < renderers.Length; i++)
+            if (playerRoot != _thirdPersonAvatarRoot)
             {
-                if (renderers[i] != null)
-                    layers |= 1 << renderers[i].gameObject.layer;
+                _thirdPersonAvatarRoot = playerRoot;
+                _thirdPersonAvatarLayers = 1 << playerRoot.gameObject.layer;
+                Renderer[] renderers = playerRoot.GetComponentsInChildren<Renderer>(true);
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    if (renderers[i] != null)
+                        _thirdPersonAvatarLayers |= 1 << renderers[i].gameObject.layer;
+                }
             }
-            return layers;
+            return _thirdPersonAvatarLayers;
         }
 
         // Token: 0x06000056 RID: 86 RVA: 0x000046BC File Offset: 0x000028BC
@@ -1963,6 +1967,8 @@ namespace TavernFun
 
         // Token: 0x04000012 RID: 18
         private Camera _thirdPersonCamera;
+        private Transform _thirdPersonAvatarRoot;
+        private int _thirdPersonAvatarLayers;
 
         // Token: 0x04000013 RID: 19
         private bool _cursorLocked = true;

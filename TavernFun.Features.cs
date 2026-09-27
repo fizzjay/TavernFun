@@ -124,6 +124,15 @@ namespace TavernFun
         private const int ParticlesMenuWidth = 260;
         private const int ParticlesMenuHeight = 420;
         private readonly ParticlesController _particles = new ParticlesController();
+        private readonly TeleportEffectsController _tpEffects = new TeleportEffectsController();
+        private bool _tpEffectsMenuOpen;
+        private Vector2 _tpEffectsMenuPosition = new Vector2(640f, 240f);
+        private bool _isDraggingTpEffectsMenu;
+        private Vector2 _dragOffsetTpEffectsMenu;
+        private Rect _lastTpEffectsMenuRect;
+        private Vector2 _tpEffectsScroll;
+        private const int TpEffectsMenuWidth = 280;
+        private const int TpEffectsMenuHeight = 430;
         private readonly SpiderController _spider = new SpiderController();
         private readonly SuperFlyController _superFly = new SuperFlyController();
         private readonly HipMoveController _hipMove = new HipMoveController();
@@ -232,7 +241,7 @@ namespace TavernFun
         public void Update()
         {
             if (_input.IsMenuTogglePressed) { IsVisible = !IsVisible; }
-            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
             _flatscreen.Tick();
             _weather.Tick();
             _graphics.Tick();
@@ -242,6 +251,7 @@ namespace TavernFun
             _handRotation.Tick();
             _superFly.Tick();
             _hipMove.Tick(_flatscreen);
+            _tpEffects.Tick();
         }
         public void LateUpdate()
         {
@@ -295,6 +305,10 @@ namespace TavernFun
                 {
                     DrawParticlesMenu();
                 }
+                if (_tpEffectsMenuOpen)
+                {
+                    DrawTpEffectsMenu();
+                }
                 if (_jeanGreyMenuOpen)
                 {
                     DrawJeanGreyMenu();
@@ -318,12 +332,13 @@ namespace TavernFun
                                                 || (_perfMenuOpen && _lastPerfMenuRect.Contains(mousePos))
                                                 || (_handRotMenuOpen && _lastHandRotMenuRect.Contains(mousePos))
                                                 || (_particlesMenuOpen && _lastParticlesMenuRect.Contains(mousePos))
+                                                || (_tpEffectsMenuOpen && _lastTpEffectsMenuRect.Contains(mousePos))
                                                 || (_fingerMenuOpen && _lastFingerMenuRect.Contains(mousePos))
                                                 || (_jeanGreyMenuOpen && _lastJeanGreyMenuRect.Contains(mousePos))
                                                 || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
                                                 || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
                                                 || IsPointerOverUgui();
-                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
+                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
                 return;
             }
             EnsureStyles();
@@ -402,6 +417,10 @@ namespace TavernFun
             {
                 DrawParticlesMenu();
             }
+            if (_tpEffectsMenuOpen)
+            {
+                DrawTpEffectsMenu();
+            }
             if (_graphicsMenuOpen)
             {
                 DrawGraphicsMenu();
@@ -431,11 +450,12 @@ namespace TavernFun
                             || (_fingerMenuOpen && _lastFingerMenuRect.Contains(mousePos))
                             || (_perfMenuOpen && _lastPerfMenuRect.Contains(mousePos))
                             || (_particlesMenuOpen && _lastParticlesMenuRect.Contains(mousePos))
+                            || (_tpEffectsMenuOpen && _lastTpEffectsMenuRect.Contains(mousePos))
                             || (_jeanGreyMenuOpen && _lastJeanGreyMenuRect.Contains(mousePos))
                             || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
                             || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
                             || IsPointerOverUgui();
-            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
         }
 
         // The Puppet menu is uGUI (UniverseLib), so the IMGUI rect checks above
@@ -2030,6 +2050,12 @@ namespace TavernFun
             {
                 _spider.Toggle();
             }
+            GUILayout.Space(6f);
+            Rect tpEffectsRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(160f));
+            if (DrawGoldButton(tpEffectsRect, "TP Effects", _tpEffectsMenuOpen || _tpEffects.IsActive, false))
+            {
+                _tpEffectsMenuOpen = true;
+            }
 
         }
         private void DrawJeanGreyMenu()
@@ -2122,6 +2148,60 @@ namespace TavernFun
 
             GUILayout.EndArea();
         }
+        private void DrawTpEffectsMenu()
+        {
+            EnsureStyles();
+            Rect outer = new Rect(_tpEffectsMenuPosition.x, _tpEffectsMenuPosition.y, TpEffectsMenuWidth, TpEffectsMenuHeight);
+            _lastTpEffectsMenuRect = outer;
+            GUI.DrawTexture(new Rect(outer.x + 4f, outer.y + 5f, outer.width, outer.height), _outerShadowTexture, ScaleMode.StretchToFill);
+            GUI.DrawTexture(outer, _outerFrameTexture, ScaleMode.StretchToFill);
+            Rect title = new Rect(outer.x + OuterFramePadding, outer.y + OuterFramePadding, outer.width - OuterFramePadding * 2f, TitleBarHeight);
+            GUI.DrawTexture(title, _titleBarTexture, ScaleMode.StretchToFill);
+            GUI.Label(new Rect(title.x, title.y + 1f, title.width, title.height), "TP EFFECTS", _titleShadowStyle);
+            GUI.Label(title, "TP EFFECTS", _titleLabelStyle);
+            HandleDrag(title, ref _tpEffectsMenuPosition, ref _isDraggingTpEffectsMenu, ref _dragOffsetTpEffectsMenu);
+
+            Rect inner = new Rect(outer.x + OuterFramePadding, title.yMax + 4f, outer.width - OuterFramePadding * 2f, outer.height - OuterFramePadding - TitleBarHeight - 8f);
+            GUI.DrawTexture(inner, _innerBackgroundTexture, ScaleMode.StretchToFill);
+            GUILayout.BeginArea(inner);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(_tpEffects.Status, _labelStyle);
+            GUILayout.FlexibleSpace();
+            Rect close = GUILayoutUtility.GetRect(58f, ActionButtonHeight, GUILayout.Width(58f));
+            if (DrawGoldButton(close, "Close", false, false)) _tpEffectsMenuOpen = false;
+            GUILayout.EndHorizontal();
+            GUILayout.Space(3f);
+            Rect stopAll = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.ExpandWidth(true));
+            if (DrawGoldButton(stopAll, "Stop All TP Effects", false, false)) _tpEffects.StopAll();
+
+            _tpEffectsScroll = GUILayout.BeginScrollView(_tpEffectsScroll, GUILayout.ExpandWidth(true), GUILayout.Height(210f));
+            DrawTpEffectToggle("Teleport Sphere", _tpEffects.SphereEnabled, value => _tpEffects.SphereEnabled = value);
+            DrawTpEffectToggle("Teleport Cone", _tpEffects.ConeEnabled, value => _tpEffects.ConeEnabled = value);
+            DrawTpEffectToggle("Teleport Star", _tpEffects.StarEnabled, value => _tpEffects.StarEnabled = value);
+            DrawTpEffectToggle("Teleport Ring", _tpEffects.RingEnabled, value => _tpEffects.RingEnabled = value);
+            DrawTpEffectToggle("Teleport Cube", _tpEffects.CubeEnabled, value => _tpEffects.CubeEnabled = value);
+            DrawTpEffectToggle("Teleport Helix", _tpEffects.HelixEnabled, value => _tpEffects.HelixEnabled = value);
+            DrawTpEffectToggle("Contracting Ring Arena", _tpEffects.RingArenaEnabled, value => _tpEffects.RingArenaEnabled = value);
+            DrawTpEffectToggle("Other-player pillars (with sphere)", _tpEffects.PillarsEnabled, value => _tpEffects.PillarsEnabled = value);
+            GUILayout.EndScrollView();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Scale: " + _tpEffects.Scale.ToString("0.0"), _panelHeaderStyle);
+            float scale = GUILayout.HorizontalSlider(_tpEffects.Scale, 0.2f, 3f, GUILayout.ExpandWidth(true));
+            _tpEffects.Scale = scale;
+            GUILayout.EndHorizontal();
+            GUILayout.Label("Shapes repeat each second; arena rings animate. Effect count is capped.", _labelStyle);
+            GUILayout.EndArea();
+        }
+
+        private void DrawTpEffectToggle(string label, bool enabled, Action<bool> setEnabled)
+        {
+            Rect button = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.ExpandWidth(true));
+            if (DrawGoldButton(button, label + (enabled ? ": On" : ": Off"), enabled, false))
+                setEnabled(!enabled);
+            GUILayout.Space(2f);
+        }
+
         private void DrawParticlesMenu()
         {
             EnsureStyles();
@@ -6062,8 +6142,8 @@ namespace TavernFun
         private Transform _avatarRoot;
         private HandGrip _leftGrip;
         private HandGrip _rightGrip;
-        private Quaternion _leftBaseRotation;
-        private Quaternion _rightBaseRotation;
+        private Quaternion _lastLeftOffset = Quaternion.identity;
+        private Quaternion _lastRightOffset = Quaternion.identity;
 
         internal void Init()
         {
@@ -6086,13 +6166,47 @@ namespace TavernFun
 
         internal void Tick()
         {
-            if (!EnsureRig())
+            Quaternion leftOffset = Quaternion.Euler(LeftPitch, LeftYaw, LeftRoll);
+            Quaternion rightOffset = Quaternion.Euler(RightPitch, RightYaw, RightRoll);
+            bool hasOffsets = Mathf.Abs(LeftPitch) > 0.001f || Mathf.Abs(LeftYaw) > 0.001f || Mathf.Abs(LeftRoll) > 0.001f
+                || Mathf.Abs(RightPitch) > 0.001f || Mathf.Abs(RightYaw) > 0.001f || Mathf.Abs(RightRoll) > 0.001f;
+
+            // With neutral settings, leave the game's tracked hand rotations entirely alone.
+            // Reapplying a startup quaternion every frame freezes the grip pose as a player joins.
+            if (!hasOffsets)
             {
+                RemoveAppliedOffsets();
                 return;
             }
+            if (!EnsureRig()) return;
 
-            _leftGrip.transform.localRotation = _leftBaseRotation * Quaternion.Euler(LeftPitch, LeftYaw, LeftRoll);
-            _rightGrip.transform.localRotation = _rightBaseRotation * Quaternion.Euler(RightPitch, RightYaw, RightRoll);
+            ApplyOffset(_leftGrip, ref _lastLeftOffset, leftOffset);
+            ApplyOffset(_rightGrip, ref _lastRightOffset, rightOffset);
+        }
+
+        private void ApplyOffset(HandGrip grip, ref Quaternion previousOffset, Quaternion nextOffset)
+        {
+            if (grip == null) return;
+            // Strip only our previous offset from the latest game-authored pose before applying
+            // the current offset, so tracking/animation can keep changing the base rotation.
+            Quaternion nativeRotation = grip.transform.localRotation * Quaternion.Inverse(previousOffset);
+            grip.transform.localRotation = nativeRotation * nextOffset;
+            previousOffset = nextOffset;
+        }
+
+        private void RemoveAppliedOffsets()
+        {
+            RemoveOffset(_leftGrip, ref _lastLeftOffset);
+            RemoveOffset(_rightGrip, ref _lastRightOffset);
+        }
+
+        private static void RemoveOffset(HandGrip grip, ref Quaternion previousOffset)
+        {
+            if (grip != null && Quaternion.Angle(previousOffset, Quaternion.identity) > 0.001f)
+            {
+                grip.transform.localRotation *= Quaternion.Inverse(previousOffset);
+            }
+            previousOffset = Quaternion.identity;
         }
 
         internal void Save()
@@ -6130,6 +6244,7 @@ namespace TavernFun
                 return true;
             }
 
+            RemoveAppliedOffsets();
             Hand[] hands = root.GetComponentsInChildren<Hand>(true);
             HandGrip leftGrip = null;
             HandGrip rightGrip = null;
@@ -6149,8 +6264,6 @@ namespace TavernFun
             _avatarRoot = root;
             _leftGrip = leftGrip;
             _rightGrip = rightGrip;
-            _leftBaseRotation = leftGrip.transform.localRotation;
-            _rightBaseRotation = rightGrip.transform.localRotation;
             return true;
         }
     }
@@ -6343,6 +6456,362 @@ namespace TavernFun
             }
             catch { }
             return Camera.main;
+        }
+    }
+
+
+    // Reproduces the bundled teleport-effect shapes through PlayerEffectController's
+    // remoteTeleportEffect RPC. A bounded number of effect events are emitted each cycle.
+    internal sealed class TeleportEffectsController
+    {
+        private const int MaxEffectsPerBurst = 180;
+        private const int MaxArenaPoints = 48;
+        private bool _centerSet;
+        private Vector3 _center;
+        private float _nextCenterScan;
+        private float _nextBurst;
+        private float _nextArenaTick;
+        private float _arenaRadius;
+        private float _arenaLastTime;
+        private int _nextWarningTime;
+        private float _nextApiResolveTime;
+        private PlayerEffectController _effectController;
+        private FieldInfo _remoteEffectField;
+        private Type _teleportInfoType;
+        private FieldInfo _teleportPositionField;
+        private FieldInfo _teleportTypeField;
+        private MethodInfo _sendToChunksMethod;
+
+        internal bool SphereEnabled { get; set; }
+        internal bool ConeEnabled { get; set; }
+        internal bool StarEnabled { get; set; }
+        internal bool RingEnabled { get; set; }
+        internal bool CubeEnabled { get; set; }
+        internal bool HelixEnabled { get; set; }
+        internal bool RingArenaEnabled { get; set; }
+        internal bool PillarsEnabled { get; set; }
+        internal float Scale { get; set; } = 1f;
+        internal bool IsActive { get { return AnyEnabled(); } }
+        internal string Status { get { return IsActive ? "Teleport effects running" : "Choose one or more effects"; } }
+
+        internal void StopAll()
+        {
+            SphereEnabled = ConeEnabled = StarEnabled = RingEnabled = CubeEnabled = HelixEnabled = false;
+            RingArenaEnabled = PillarsEnabled = false;
+        }
+
+        internal void Tick()
+        {
+            if (!AnyEnabled())
+            {
+                _centerSet = false;
+                _arenaRadius = 0f;
+                return;
+            }
+            if (!_centerSet)
+            {
+                if (Time.time < _nextCenterScan) return;
+                if (!TryGetCenter(out _center))
+                {
+                    _nextCenterScan = Time.time + 1f;
+                    return;
+                }
+                _centerSet = true;
+                _nextBurst = Time.time;
+            }
+
+            if (Time.time >= _nextBurst)
+            {
+                TickShapes();
+                _nextBurst = Time.time + 1f;
+            }
+            if (RingArenaEnabled && Time.time >= _nextArenaTick)
+                TickRingArena();
+        }
+
+        private bool AnyEnabled()
+        {
+            return SphereEnabled || ConeEnabled || StarEnabled || RingEnabled || CubeEnabled || HelixEnabled || RingArenaEnabled;
+        }
+
+        private void TickShapes()
+        {
+            List<List<Vector3>> shapes = new List<List<Vector3>>();
+            if (SphereEnabled) shapes.Add(BuildSphere());
+            if (ConeEnabled) shapes.Add(BuildCone());
+            if (StarEnabled) shapes.Add(BuildStar());
+            if (RingEnabled) shapes.Add(BuildRing());
+            if (CubeEnabled) shapes.Add(BuildCube());
+            if (HelixEnabled) shapes.Add(BuildHelix());
+            int perShape = shapes.Count > 0 ? Mathf.Max(1, MaxEffectsPerBurst / shapes.Count) : 0;
+            for (int i = 0; i < shapes.Count; i++) SpawnSampled(shapes[i], perShape, Scale);
+            if (SphereEnabled && PillarsEnabled) SpawnOtherPlayerPillars();
+        }
+
+        private void TickRingArena()
+        {
+            float scale = Mathf.Clamp(Scale, 0.2f, 3f);
+            float maxRadius = 12f * scale;
+            if (_arenaRadius <= 0f || _arenaRadius > maxRadius) _arenaRadius = maxRadius;
+            float spacing = Mathf.Max(0.2f, 0.6f * scale);
+            int count = Mathf.Max(12, Mathf.CeilToInt(2f * Mathf.PI * _arenaRadius / spacing));
+            List<Vector3> points = new List<Vector3>();
+            for (int i = 0; i < count; i++)
+            {
+                float angle = i / (float)count * Mathf.PI * 2f;
+                Vector3 point = new Vector3(Mathf.Cos(angle) * _arenaRadius, 0f, Mathf.Sin(angle) * _arenaRadius);
+                for (float y = -0.5f * scale; y <= 0.5f * scale + 0.001f; y += 0.5f * scale)
+                    points.Add(point + Vector3.up * y);
+            }
+            SpawnSampled(points, MaxArenaPoints, 1f);
+            float now = Time.time;
+            float elapsed = _arenaLastTime > 0f ? now - _arenaLastTime : 0.12f;
+            _arenaLastTime = now;
+            _arenaRadius = Mathf.Max(Mathf.Max(0.05f, maxRadius * 0.08f), _arenaRadius - 0.5f * scale * Mathf.Max(0.001f, elapsed));
+            _nextArenaTick = now + 0.12f;
+        }
+
+        private void SpawnOtherPlayerPillars()
+        {
+            HashSet<IPlayer> allPlayers = Player.AllPlayers;
+            if (allPlayers == null) return;
+            int playerCount = 0;
+            foreach (IPlayer other in allPlayers)
+            {
+                if (other == null || other.IsLocalPlayer || other.PlayerController == null) continue;
+                if ((other.PlayerController.PlayerFeetPosition - _center).sqrMagnitude > 400f) continue;
+                Vector3 feet = other.PlayerController.PlayerFeetPosition;
+                for (float y = 0f; y <= 4f; y += 0.5f) SpawnEffect(feet + Vector3.up * y);
+                if (++playerCount >= 12) break;
+            }
+        }
+
+        private void SpawnSampled(List<Vector3> offsets, int limit, float scale)
+        {
+            if (offsets == null || offsets.Count == 0 || limit <= 0) return;
+            int stride = Mathf.Max(1, Mathf.CeilToInt(offsets.Count / (float)limit));
+            int emitted = 0;
+            for (int i = 0; i < offsets.Count && emitted < limit; i += stride, emitted++)
+                SpawnEffect(_center + offsets[i] * scale);
+        }
+
+        private static List<Vector3> BuildSphere()
+        {
+            List<Vector3> offsets = new List<Vector3>(5000);
+            const float outerRadius = 20f;
+            const float innerRadius = 19.5f;
+            float innerSquared = innerRadius * innerRadius;
+            float outerSquared = outerRadius * outerRadius;
+            for (float x = -outerRadius; x <= outerRadius; x += 1f)
+            for (float y = -outerRadius; y <= outerRadius; y += 1f)
+            for (float z = -outerRadius; z <= outerRadius; z += 1f)
+            {
+                Vector3 point = new Vector3(x, y, z);
+                float sqr = point.sqrMagnitude;
+                if (sqr >= innerSquared && sqr <= outerSquared) offsets.Add(point);
+            }
+            return offsets;
+        }
+
+        private static List<Vector3> BuildCone()
+        {
+            List<Vector3> offsets = new List<Vector3>();
+            for (int y = 0; y <= 18; y++)
+            {
+                float radius = 10f * y / 18f;
+                if (radius <= 0.001f) { offsets.Add(Vector3.zero); continue; }
+                int segments = Mathf.Max(6, Mathf.CeilToInt(2f * Mathf.PI * radius));
+                for (int i = 0; i < segments; i++)
+                {
+                    float angle = i / (float)segments * Mathf.PI * 2f;
+                    offsets.Add(new Vector3(Mathf.Cos(angle) * radius, y, Mathf.Sin(angle) * radius));
+                }
+            }
+            return offsets;
+        }
+
+        private static List<Vector3> BuildStar()
+        {
+            List<Vector3> offsets = new List<Vector3>();
+            Vector3[] vertices = new Vector3[10];
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                float angle = i / 10f * Mathf.PI * 2f;
+                float radius = i % 2 == 0 ? 12f : 6f;
+                vertices[i] = new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+            }
+            for (int edge = 0; edge < vertices.Length; edge++)
+            {
+                Vector3 a = vertices[edge];
+                Vector3 b = vertices[(edge + 1) % vertices.Length];
+                int steps = Mathf.Max(1, Mathf.CeilToInt(Vector3.Distance(a, b)));
+                for (int i = 0; i <= steps; i++)
+                {
+                    Vector3 point = Vector3.Lerp(a, b, i / (float)steps);
+                    for (float y = -0.5f; y <= 0.5f; y += 0.5f) offsets.Add(point + Vector3.up * y);
+                }
+            }
+            return offsets;
+        }
+
+        private static List<Vector3> BuildRing()
+        {
+            List<Vector3> offsets = new List<Vector3>();
+            const float radius = 12f;
+            int count = Mathf.Max(12, Mathf.CeilToInt(2f * Mathf.PI * radius / 0.6f));
+            for (int i = 0; i < count; i++)
+            {
+                float angle = i / (float)count * Mathf.PI * 2f;
+                Vector3 point = new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+                for (float y = -0.5f; y <= 0.5f; y += 0.5f) offsets.Add(point + Vector3.up * y);
+            }
+            return offsets;
+        }
+
+        private static List<Vector3> BuildCube()
+        {
+            List<Vector3> offsets = new List<Vector3>();
+            Vector3[] corners = new Vector3[8];
+            for (int i = 0; i < 8; i++)
+                corners[i] = new Vector3((i & 1) == 0 ? -8f : 8f, (i & 2) == 0 ? -8f : 8f, (i & 4) == 0 ? -8f : 8f);
+            for (int i = 0; i < 8; i++)
+            for (int axis = 0; axis < 3; axis++)
+            {
+                int other = i ^ (1 << axis);
+                if (i >= other) continue;
+                int steps = Mathf.Max(1, Mathf.CeilToInt(Vector3.Distance(corners[i], corners[other])));
+                for (int j = 0; j <= steps; j++) offsets.Add(Vector3.Lerp(corners[i], corners[other], j / (float)steps));
+            }
+            return offsets;
+        }
+
+        private static List<Vector3> BuildHelix()
+        {
+            List<Vector3> offsets = new List<Vector3>();
+            for (int i = 0; i <= 32; i++)
+            {
+                float t = i / 32f;
+                float angle = t * Mathf.PI * 2f * 3f;
+                offsets.Add(new Vector3(Mathf.Cos(angle) * 6f, t * 16f, Mathf.Sin(angle) * 6f));
+            }
+            return offsets;
+        }
+
+        private bool TryGetCenter(out Vector3 center)
+        {
+            if (TryGetFriendlyOrbCenter(out center)) return true;
+            PlayerController player = PlayerController.Current;
+            if (player != null)
+            {
+                center = player.PlayerFeetPosition;
+                return true;
+            }
+            center = Vector3.zero;
+            return false;
+        }
+
+        private bool TryGetFriendlyOrbCenter(out Vector3 center)
+        {
+            center = Vector3.zero;
+            try
+            {
+                Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+                for (int i = 0; i < assemblies.Length; i++)
+                {
+                    Type orbType = null;
+                    try
+                    {
+                        Type[] types = assemblies[i].GetTypes();
+                        for (int j = 0; j < types.Length; j++)
+                            if (types[j] != null && types[j].Name == "FriendlyOrbBehavior2") { orbType = types[j]; break; }
+                    }
+                    catch { }
+                    if (orbType == null) continue;
+                    FieldInfo bodyField = AccessTools.Field(orbType, "tp_rb");
+                    PropertyInfo bodyProperty = orbType.GetProperty("tp_rb", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    UnityEngine.Object[] orbs = Resources.FindObjectsOfTypeAll(orbType);
+                    for (int j = 0; j < orbs.Length; j++)
+                    {
+                        Component orb = orbs[j] as Component;
+                        if (orb == null || !orb.gameObject.activeInHierarchy) continue;
+                        object body = bodyField != null ? bodyField.GetValue(orb) : (bodyProperty != null ? bodyProperty.GetValue(orb, null) : null);
+                        Rigidbody rb = body as Rigidbody;
+                        if (rb != null) { center = rb.position; return true; }
+                        Component bodyComponent = body as Component;
+                        if (bodyComponent != null) { center = bodyComponent.transform.position; return true; }
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private void SpawnEffect(Vector3 position)
+        {
+            try
+            {
+                PlayerController player = PlayerController.Current;
+                if (player == null) return;
+                PlayerEffectController controller = player.transform.GetComponent<PlayerEffectController>();
+                if (controller == null) return;
+                if (!object.ReferenceEquals(_effectController, controller)
+                    || (_sendToChunksMethod == null && Time.time >= _nextApiResolveTime))
+                {
+                    ResolveEffectApi(controller);
+                    _nextApiResolveTime = Time.time + 1f;
+                }
+                if (_remoteEffectField == null || _teleportInfoType == null || _sendToChunksMethod == null) return;
+                object remote = _remoteEffectField.GetValue(controller);
+                if (remote == null) return;
+                object info = Activator.CreateInstance(_teleportInfoType);
+                if (_teleportPositionField != null) _teleportPositionField.SetValue(info, position);
+                if (_teleportTypeField != null && _teleportTypeField.FieldType.IsEnum)
+                {
+                    try { _teleportTypeField.SetValue(info, Enum.Parse(_teleportTypeField.FieldType, "Unknown")); }
+                    catch { }
+                }
+                ParameterInfo[] parameters = _sendToChunksMethod.GetParameters();
+                object recipients = parameters[1].ParameterType.IsArray
+                    ? Array.CreateInstance(parameters[1].ParameterType.GetElementType(), 0)
+                    : null;
+                _sendToChunksMethod.Invoke(remote, new object[] { info, recipients });
+            }
+            catch (Exception ex)
+            {
+                if (Time.frameCount > _nextWarningTime)
+                {
+                    _nextWarningTime = Time.frameCount + 300;
+                    MelonLogger.Warning("TP Effects: " + ex.GetBaseException().Message);
+                }
+            }
+        }
+
+        private void ResolveEffectApi(PlayerEffectController controller)
+        {
+            _effectController = controller;
+            Type componentType = controller.GetType();
+            _remoteEffectField = AccessTools.Field(componentType, "remoteTeleportEffect");
+            _teleportInfoType = null;
+            Type[] nested = componentType.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic);
+            for (int i = 0; i < nested.Length; i++)
+                if (nested[i].Name == "PlayerEffectTeleportInformation") { _teleportInfoType = nested[i]; break; }
+            _teleportPositionField = _teleportInfoType != null ? AccessTools.Field(_teleportInfoType, "teleportEffectPosition") : null;
+            _teleportTypeField = _teleportInfoType != null ? AccessTools.Field(_teleportInfoType, "teleportType") : null;
+            _sendToChunksMethod = null;
+            object remote = _remoteEffectField != null ? _remoteEffectField.GetValue(controller) : null;
+            if (remote != null)
+            {
+                MethodInfo[] methods = remote.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                for (int i = 0; i < methods.Length; i++)
+                {
+                    ParameterInfo[] parameters = methods[i].GetParameters();
+                    if (methods[i].Name == "SendToChunks" && parameters.Length == 2)
+                    {
+                        _sendToChunksMethod = methods[i];
+                        break;
+                    }
+                }
+            }
         }
     }
 

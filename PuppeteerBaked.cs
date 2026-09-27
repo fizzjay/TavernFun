@@ -1753,7 +1753,8 @@ namespace TownshipPuppeteerV2
                 {
                     PlayerController playerController = PlayerController.Current;
                     this.SetCameraPosition(playerController);
-                    this.SetControllerPositions(playerController);
+                    // Do not force the VR controller transforms to PanKake's desktop pose:
+                    // the game's tracked hand rotations need to remain authoritative.
                     UIManager.LogHandler("PanKake setup completed successfully.", LogType.Log);
                 }
             }
@@ -1847,35 +1848,6 @@ namespace TownshipPuppeteerV2
             catch (Exception ex)
             {
                 UIManager.LogHandler("Error setting camera position: " + ex.Message, LogType.Error);
-            }
-        }
-
-        private void SetControllerPositions(PlayerController player)
-        {
-            try
-            {
-                Controller rightController = player.RightController;
-                this.SetControllerPosition((rightController != null) ? rightController.transform : null, new Vector3(0.195f, 1.3f, 0.25f), "Right");
-                Controller leftController = player.LeftController;
-                this.SetControllerPosition((leftController != null) ? leftController.transform : null, new Vector3(-0.195f, 1.3f, 0.25f), "Left");
-            }
-            catch (Exception ex)
-            {
-                UIManager.LogHandler("Error setting controller positions: " + ex.Message, LogType.Error);
-            }
-        }
-
-        private void SetControllerPosition(Transform controllerTransform, Vector3 position, string side)
-        {
-            if (controllerTransform != null)
-            {
-                controllerTransform.localPosition = position;
-                controllerTransform.localRotation = Quaternion.Euler(298.5f, 0f, 0f);
-                UIManager.LogHandler(side + " controller position and rotation set.", LogType.Log);
-            }
-            else
-            {
-                UIManager.LogHandler(side + " controller transform is null.", LogType.Warning);
             }
         }
 
