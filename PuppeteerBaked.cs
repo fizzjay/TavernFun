@@ -1045,9 +1045,22 @@ namespace TownshipPuppeteerV2
             }
         }
 
+        private PlayerController _lastLocalPlayerController;
+
         public override void OnSceneWasLoaded(int buildIndex, string sceneName)
         {
             base.OnSceneWasLoaded(buildIndex, sceneName);
+            TownshipPuppeteer.UI.MenuPanel.inPanKakeMode = false;
+            TownshipPuppeteer.UI.MenuPanel.inSEMMode = false;
+            PlayerController current = PlayerController.Current;
+            if (current != null)
+            {
+                PanKakeBehaviour panKake = current.GetComponent<PanKakeBehaviour>();
+                if (panKake != null) panKake.enabled = false;
+                SourceEngineMovement movement = current.GetComponent<SourceEngineMovement>();
+                if (movement != null) movement.ToggleMovement(false);
+            }
+            this._lastLocalPlayerController = current;
             Core.CheckSmoothLoco();
         }
 
@@ -1056,6 +1069,7 @@ namespace TownshipPuppeteerV2
             bool flag = !Core.Loaded;
             if (!flag)
             {
+                this.ResetMovementModesForNewPlayer();
                 bool flag2 = TownshipPuppeteer.UI.MenuPanel.Instance != null;
                 if (flag2)
                 {
@@ -1215,6 +1229,29 @@ namespace TownshipPuppeteerV2
                 Core.thirdPerson = !Core.thirdPerson;
                 Object.Destroy(GameObject.Find("3rdPerson"));
             }
+        }
+
+        private void ResetMovementModesForNewPlayer()
+        {
+            PlayerController current = PlayerController.Current;
+            if (current == null || object.ReferenceEquals(current, this._lastLocalPlayerController))
+            {
+                return;
+            }
+
+            // PanKake's Setup() overwrites the controller transforms for desktop emulation.
+            // Never carry that mode onto a replacement player avatar after joining/re-spawning.
+            TownshipPuppeteer.UI.MenuPanel.inPanKakeMode = false;
+            TownshipPuppeteer.UI.MenuPanel.inSEMMode = false;
+
+            if (this._lastLocalPlayerController != null)
+            {
+                PanKakeBehaviour oldPanKake = this._lastLocalPlayerController.GetComponent<PanKakeBehaviour>();
+                if (oldPanKake != null) oldPanKake.enabled = false;
+                SourceEngineMovement oldMovement = this._lastLocalPlayerController.GetComponent<SourceEngineMovement>();
+                if (oldMovement != null) oldMovement.ToggleMovement(false);
+            }
+            this._lastLocalPlayerController = current;
         }
 
         private void EnsurePanKakeBehaviour()

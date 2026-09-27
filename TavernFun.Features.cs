@@ -1546,6 +1546,12 @@ namespace TavernFun
             GUILayout.BeginHorizontal();
             GUILayout.Label("FOV  " + Mathf.RoundToInt(_fovValue), _panelHeaderStyle);
             GUILayout.FlexibleSpace();
+            if (GUILayout.Button("Reset", GUILayout.Width(54f)))
+            {
+                _fovValue = 90f;
+                Camera resetCamera = GetLocalPlayerCamera();
+                if (resetCamera != null) resetCamera.fieldOfView = _fovValue;
+            }
             if (GUILayout.Button("Close", GUILayout.Width(54f))) _fovMenuOpen = false;
             GUILayout.EndHorizontal();
             GUILayout.Space(8f);

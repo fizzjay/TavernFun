@@ -1354,6 +1354,9 @@ namespace TavernFun
                 if (!(this._thirdPersonCamera == null))
                 {
                     FlatscreenCore.SyncThirdPersonCameraSettings(sourceCamera, this._thirdPersonCamera);
+                    // The first-person camera commonly excludes the local avatar's render
+                    // layers. The third-person view must include them so the body is visible.
+                    this._thirdPersonCamera.cullingMask |= GetAvatarRenderLayers(playerRoot);
                     Vector3 vector = playerRoot.position + Vector3.up * (this._heightOffset + 0.1f);
                     Quaternion cameraRotation = this._input.CameraRotation;
                     Vector3 vector2 = cameraRotation * new Vector3(0f, this._thirdPersonHeight, 0f - this._thirdPersonDistance);
@@ -1363,6 +1366,19 @@ namespace TavernFun
                     this._thirdPersonCamera.tag = "MainCamera";
                 }
             }
+        }
+
+        private static int GetAvatarRenderLayers(Transform playerRoot)
+        {
+            if (playerRoot == null) return 0;
+            int layers = 1 << playerRoot.gameObject.layer;
+            Renderer[] renderers = playerRoot.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null)
+                    layers |= 1 << renderers[i].gameObject.layer;
+            }
+            return layers;
         }
 
         // Token: 0x06000056 RID: 86 RVA: 0x000046BC File Offset: 0x000028BC
