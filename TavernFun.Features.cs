@@ -126,6 +126,15 @@ namespace TavernFun
         private readonly ParticlesController _particles = new ParticlesController();
         private readonly SpiderController _spider = new SpiderController();
         private readonly SuperFlyController _superFly = new SuperFlyController();
+        private readonly HipMoveController _hipMove = new HipMoveController();
+        private bool _fovMenuOpen;
+        private Vector2 _fovMenuPosition = new Vector2(360f, 40f);
+        private Rect _lastFovMenuRect;
+        private bool _isDraggingFovMenu;
+        private Vector2 _dragOffsetFovMenu;
+        private float _fovValue = 90f;
+        private const int FovMenuWidth = 250;
+        private const int FovMenuHeight = 145;
         private readonly ReviveOrbController _revive = new ReviveOrbController();
         private bool _voidBurnDamageEnabled = false;
         // PanKake's own panel - bigger, scrollable, opened with a right-click.
@@ -223,7 +232,7 @@ namespace TavernFun
         public void Update()
         {
             if (_input.IsMenuTogglePressed) { IsVisible = !IsVisible; }
-            IsCursorFree = IsVisible || _panKakePanelOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
             _flatscreen.Tick();
             _weather.Tick();
             _graphics.Tick();
@@ -232,6 +241,7 @@ namespace TavernFun
             _jeanGrey.Tick();
             _handRotation.Tick();
             _superFly.Tick();
+            _hipMove.Tick(_flatscreen);
         }
         public void LateUpdate()
         {
@@ -242,6 +252,7 @@ namespace TavernFun
             // its own late-update pass - this is what stops the continuous spin when the
             // body is left flat and unlocked.
             _superFly.LateTick();
+            _hipMove.LateTick();
         }
 
         public void Draw()
@@ -296,6 +307,10 @@ namespace TavernFun
                 {
                     DrawHandRotMenu();
                 }
+                if (_fovMenuOpen)
+                {
+                    DrawFovMenu();
+                }
                 IsPointerOverUI = (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                                                 || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
                                                 || (_grabMenuOpen && _lastGrabMenuRect.Contains(mousePos))
@@ -306,8 +321,9 @@ namespace TavernFun
                                                 || (_fingerMenuOpen && _lastFingerMenuRect.Contains(mousePos))
                                                 || (_jeanGreyMenuOpen && _lastJeanGreyMenuRect.Contains(mousePos))
                                                 || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
+                                                || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
                                                 || IsPointerOverUgui();
-                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
+                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
                 return;
             }
             EnsureStyles();
@@ -402,6 +418,10 @@ namespace TavernFun
             {
                 DrawHandRotMenu();
             }
+            if (_fovMenuOpen)
+            {
+                DrawFovMenu();
+            }
             IsPointerOverUI = _lastMainRect.Contains(mousePos)
                             || (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                             || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
@@ -413,8 +433,9 @@ namespace TavernFun
                             || (_particlesMenuOpen && _lastParticlesMenuRect.Contains(mousePos))
                             || (_jeanGreyMenuOpen && _lastJeanGreyMenuRect.Contains(mousePos))
                             || (_soundsMenuOpen && _lastSoundsMenuRect.Contains(mousePos))
+                            || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
                             || IsPointerOverUgui();
-            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || TownshipPuppeteer.PuppetMenuBridge.IsOpen;
         }
 
         // The Puppet menu is uGUI (UniverseLib), so the IMGUI rect checks above
@@ -1479,7 +1500,72 @@ namespace TavernFun
                 _flatscreen.ToggleThirdPerson();
             }
             GUILayout.Space(6f);
+
+            GUILayout.BeginHorizontal();
+            Rect fovRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(fovRect, "Change FOV", _fovMenuOpen, false))
+            {
+                Camera camera = GetLocalPlayerCamera();
+                if (camera != null) _fovValue = Mathf.Clamp(camera.fieldOfView, 30f, 120f);
+                _fovMenuOpen = !_fovMenuOpen;
+            }
+            GUILayout.FlexibleSpace();
+            Rect hipRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(hipRect, _hipMove.Enabled ? "Hip Move: On" : "Hip Move", _hipMove.Enabled, false))
+            {
+                _hipMove.Toggle(_flatscreen);
+            }
+            GUILayout.EndHorizontal();
         }
+
+        private static Camera GetLocalPlayerCamera()
+        {
+            try
+            {
+                if (PlayerController.Current != null && PlayerController.Current.Camera != null)
+                    return PlayerController.Current.Camera;
+            }
+            catch { }
+            return Camera.main;
+        }
+
+        private void DrawFovMenu()
+        {
+            EnsureStyles();
+            Rect rect = new Rect(_fovMenuPosition.x, _fovMenuPosition.y, FovMenuWidth, FovMenuHeight);
+            _lastFovMenuRect = rect;
+            GUI.DrawTexture(new Rect(rect.x + 4f, rect.y + 5f, rect.width, rect.height), _outerShadowTexture, ScaleMode.StretchToFill);
+            GUI.DrawTexture(rect, _outerFrameTexture, ScaleMode.StretchToFill);
+            Rect title = new Rect(rect.x + OuterFramePadding, rect.y + OuterFramePadding, rect.width - OuterFramePadding * 2f, TitleBarHeight);
+            GUI.DrawTexture(title, _titleBarTexture, ScaleMode.StretchToFill);
+            GUI.Label(title, "FIELD OF VIEW", _titleLabelStyle);
+            HandleDrag(title, ref _fovMenuPosition, ref _isDraggingFovMenu, ref _dragOffsetFovMenu);
+            Rect inner = new Rect(rect.x + OuterFramePadding, title.yMax + 4f, rect.width - OuterFramePadding * 2f, rect.height - TitleBarHeight - 14f);
+            GUI.DrawTexture(inner, _innerBackgroundTexture, ScaleMode.StretchToFill);
+            GUILayout.BeginArea(inner);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("FOV  " + Mathf.RoundToInt(_fovValue), _panelHeaderStyle);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("Close", GUILayout.Width(54f))) _fovMenuOpen = false;
+            GUILayout.EndHorizontal();
+            GUILayout.Space(8f);
+            float next = GUILayout.HorizontalSlider(_fovValue, 30f, 120f, GUILayout.Height(24f));
+            if (Mathf.Abs(next - _fovValue) > 0.01f)
+            {
+                _fovValue = next;
+                Camera camera = GetLocalPlayerCamera();
+                if (camera != null) camera.fieldOfView = _fovValue;
+            }
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("30", GUILayout.Width(48f))) _fovValue = 30f;
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("120", GUILayout.Width(48f))) _fovValue = 120f;
+            GUILayout.EndHorizontal();
+            Camera currentCamera = GetLocalPlayerCamera();
+            if (currentCamera != null) currentCamera.fieldOfView = _fovValue;
+            GUILayout.EndArea();
+        }
+
         private void DrawHandRotMenu()
         {
             EnsureStyles();
@@ -6063,5 +6149,195 @@ namespace TavernFun
         }
     }
     // Token: 0x0600003A RID: 58 RVA: 0x00002CB8 File Offset: 0x00000EB8
+
+
+    // Locks the local avatar and view in place, switches to the existing third-person camera,
+    // and maps vertical mouse motion onto the game's BodyControllerSettings bend value.
+    internal sealed class HipMoveController
+    {
+        private const float BendMinimum = -35f;
+        private const float BendMaximum = 35f;
+        private const float MouseSensitivity = 0.16f;
+        private readonly GameReflection _game = new GameReflection();
+        private readonly List<object> _settings = new List<object>();
+        private readonly Dictionary<object, float> _originalBendValues = new Dictionary<object, float>();
+        private FieldInfo _bendField;
+        private Transform _root;
+        private Transform _cameraTransform;
+        private Vector3 _lockedPosition;
+        private Quaternion _lockedRootRotation;
+        private Quaternion _lockedCameraRotation;
+        private float _bendValue;
+        private bool _restoreThirdPerson;
+        private bool _restoreLookLock;
+        private bool _restoreMovementLock;
+
+        internal bool Enabled { get; private set; }
+
+        internal void Toggle(FlatscreenCore flatscreen)
+        {
+            if (Enabled) Stop(flatscreen);
+            else Start(flatscreen);
+        }
+
+        private void Start(FlatscreenCore flatscreen)
+        {
+            if (!FlatscreenCore.Enabled)
+            {
+                MelonLogger.Warning("Hip Move requires PanKake to be enabled for its third-person camera.");
+                return;
+            }
+            object player = _game.FindLocalPlayer();
+            _root = _game.GetPlayerRootTransform(player);
+            Camera cam = GetLocalPlayerCamera();
+            if (player == null || _root == null)
+            {
+                MelonLogger.Warning("Hip Move: local player is not available.");
+                return;
+            }
+            _cameraTransform = cam != null ? cam.transform : null;
+            _lockedPosition = _root.position;
+            _lockedRootRotation = _root.rotation;
+            _lockedCameraRotation = _cameraTransform != null ? _cameraTransform.rotation : Quaternion.identity;
+            _restoreThirdPerson = flatscreen.ThirdPersonEnabled;
+            _restoreLookLock = false;
+            _restoreMovementLock = FlatscreenCore.SuppressPlayerMovement;
+            _restoreBendValues.Clear();
+            FindBodyBendSettings();
+            _bendValue = _bendField != null && _settings.Count > 0 ? ReadBend(_settings[0]) : 0f;
+            flatscreen.SetLookInputLocked(true);
+            flatscreen.SetThirdPersonEnabled(true);
+            FlatscreenCore.SuppressPlayerMovement = true;
+            Enabled = true;
+        }
+
+        internal void Tick(FlatscreenCore flatscreen)
+        {
+            if (!Enabled) return;
+            if (_root == null)
+            {
+                Stop(flatscreen);
+                return;
+            }
+            Vector2 delta = (flatscreen != null && !ControlMenu.IsCursorFree) ? flatscreen.ReadInputMouseDelta() : Vector2.zero;
+            _bendValue = Mathf.Clamp(_bendValue - delta.y * MouseSensitivity, BendMinimum, BendMaximum);
+            ApplyBend(_bendValue);
+            LockPose();
+        }
+
+        internal void LateTick()
+        {
+            if (Enabled) LockPose();
+        }
+
+        private void LockPose()
+        {
+            if (_root != null)
+            {
+                _root.position = _lockedPosition;
+                _root.rotation = _lockedRootRotation;
+            }
+            if (_cameraTransform != null) _cameraTransform.rotation = _lockedCameraRotation;
+        }
+
+        private void Stop(FlatscreenCore flatscreen)
+        {
+            if (!Enabled) return;
+            RestoreBend();
+            if (flatscreen != null)
+            {
+                flatscreen.SetLookInputLocked(_restoreLookLock);
+                flatscreen.SetThirdPersonEnabled(_restoreThirdPerson);
+            }
+            FlatscreenCore.SuppressPlayerMovement = _restoreMovementLock;
+            Enabled = false;
+            _root = null;
+            _cameraTransform = null;
+            _settings.Clear();
+            _originalBendValues.Clear();
+            _bendField = null;
+        }
+
+        private void FindBodyBendSettings()
+        {
+            Type settingsType = null;
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length && settingsType == null; i++)
+            {
+                try
+                {
+                    settingsType = assemblies[i].GetType("BodyControllerSettings", false);
+                    if (settingsType == null)
+                    {
+                        Type[] types = assemblies[i].GetTypes();
+                        for (int j = 0; j < types.Length; j++)
+                            if (types[j] != null && types[j].Name == "BodyControllerSettings") { settingsType = types[j]; break; }
+                    }
+                }
+                catch { }
+            }
+            if (settingsType == null) return;
+
+            FieldInfo[] fields = settingsType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            for (int i = 0; i < fields.Length; i++)
+            {
+                FieldInfo field = fields[i];
+                if (field.FieldType == typeof(float) && field.Name.IndexOf("bend", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    _bendField = field;
+                    if (field.Name.IndexOf("multiplier", StringComparison.OrdinalIgnoreCase) >= 0) break;
+                }
+            }
+            if (_bendField == null) return;
+            try
+            {
+                Array found = Resources.FindObjectsOfTypeAll(settingsType);
+                foreach (object item in found)
+                {
+                    if (item == null) continue;
+                    _settings.Add(item);
+                    _originalBendValues[item] = ReadBend(item);
+                }
+            }
+            catch { }
+        }
+
+        private float ReadBend(object settings)
+        {
+            try { return (float)_bendField.GetValue(settings); }
+            catch { return 0f; }
+        }
+
+        private void ApplyBend(float value)
+        {
+            if (_bendField == null) return;
+            for (int i = 0; i < _settings.Count; i++)
+            {
+                try { _bendField.SetValue(_settings[i], value); }
+                catch { }
+            }
+        }
+
+        private void RestoreBend()
+        {
+            if (_bendField == null) return;
+            foreach (KeyValuePair<object, float> pair in _originalBendValues)
+            {
+                try { _bendField.SetValue(pair.Key, pair.Value); }
+                catch { }
+            }
+        }
+
+        private static Camera GetLocalPlayerCamera()
+        {
+            try
+            {
+                if (PlayerController.Current != null && PlayerController.Current.Camera != null)
+                    return PlayerController.Current.Camera;
+            }
+            catch { }
+            return Camera.main;
+        }
+    }
 
 }

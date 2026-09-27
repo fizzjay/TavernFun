@@ -961,7 +961,10 @@ namespace TavernFun
                         this._game.TryReleaseHeldHands(player);
                     }
                     this._wasMovementBlocked = movementBlocked;
-                    this._input.UpdateLook(this._cursorLocked && !this._input.IsCombatModePressed);
+                    if (!this._lookInputLocked)
+                    {
+                        this._input.UpdateLook(this._cursorLocked && !this._input.IsCombatModePressed);
+                    }
 
                     // Reassert IsDebugMovement every frame regardless of fly state.
                     // When fly is ON this keeps flight alive across scene transitions.
@@ -1142,7 +1145,10 @@ namespace TavernFun
             {
                 this.EnsureMenuCamera();
                 this.AdjustHeight();
-                this._input.UpdateLook(this._cursorLocked);
+                if (!this._lookInputLocked)
+                {
+                    this._input.UpdateLook(this._cursorLocked);
+                }
                 if (this._cursorLocked)
                 {
                     this.MoveMenuCamera();
@@ -1835,6 +1841,13 @@ namespace TavernFun
             this._thirdPersonEnabled = value;
         }
 
+        // Hip-move temporarily freezes the desktop look state so mouse deltas can drive the
+        // body pose without moving the camera. The current look angles are left untouched.
+        internal void SetLookInputLocked(bool value)
+        {
+            this._lookInputLocked = value;
+        }
+
         // Token: 0x06000063 RID: 99 RVA: 0x00004C44 File Offset: 0x00002E44
         internal void ToggleThirdPerson()
         {
@@ -2009,6 +2022,7 @@ namespace TavernFun
 
         // Token: 0x0400002B RID: 43
         private bool _thirdPersonEnabled;
+        private bool _lookInputLocked;
 
         // Token: 0x0400002C RID: 44
         private float _thirdPersonDistance = 2.35f;
