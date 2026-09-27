@@ -11,6 +11,7 @@ using UnityEngine.Rendering.PostProcessing;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
@@ -252,6 +253,7 @@ namespace TavernFun
             _superFly.Tick();
             _hipMove.Tick(_flatscreen);
             _tpEffects.Tick();
+            _revive.Tick();
         }
         public void LateUpdate()
         {
@@ -1451,17 +1453,23 @@ namespace TavernFun
 
             GUILayout.FlexibleSpace();
 
-            Rect reviveRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
-            if (DrawGoldButton(reviveRect, _revive.Busy ? "Reviving..." : "Auto Revive", _revive.Busy, false)
+            Rect autoReviveRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(autoReviveRect, _revive.AutoReviveEnabled ? "Auto Revive: On" : "Auto Revive", _revive.AutoReviveEnabled, false))
+                _revive.SetAutoReviveEnabled(!_revive.AutoReviveEnabled);
+
+            GUILayout.EndHorizontal();
+            GUILayout.Space(6f);
+
+            // --- Revive Me Now (left) / Grab (right) ---
+            GUILayout.BeginHorizontal();
+            Rect reviveNowRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(reviveNowRect, _revive.Busy ? "Reviving..." : "Revive Me Now", _revive.Busy, false)
                 && !_revive.Busy)
             {
                 _revive.RunAutoRevive();
             }
 
-            GUILayout.EndHorizontal();
-            GUILayout.Space(6f);
-
-            // --- Grab (own row — a third fixed-width button in Row 2 would overflow the 300px window) ---
+            GUILayout.FlexibleSpace();
             Rect grabRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
             bool grabRightClicked = WasRightClicked(grabRect); // must run BEFORE DrawGoldButton
             bool grabLeftClicked = DrawGoldButton(grabRect, "Grab", _grabMenuOpen, false);
@@ -1469,6 +1477,7 @@ namespace TavernFun
             {
                 _grabMenuOpen = true;
             }
+            GUILayout.EndHorizontal();
             GUILayout.Space(6f);
 
             // --- Full body rotation toggle ---
@@ -4442,26 +4451,87 @@ namespace TavernFun
     internal sealed class ReviveOrbController
     {
         internal string Status { get; private set; } = "Idle";
-        internal bool Busy => _busy;
-        private bool _busy;
+        internal bool Busy { get { return _autoReviveInProgress; } }
+        internal bool AutoReviveEnabled { get { return _autoReviveEnabled; } }
+        private bool _autoReviveEnabled;
+        private bool _autoReviveInProgress;
+        private float _autoReviveNextTime;
+        private const float AutoReviveCooldown = 2f;
+        private static MethodInfo _reviveAction;
+
+        internal void SetAutoReviveEnabled(bool enabled)
+        {
+            _autoReviveEnabled = enabled;
+            Status = enabled ? "Watching for downed state." : "Auto revive disabled.";
+        }
+
+        internal void Tick()
+        {
+            if (!_autoReviveEnabled || _autoReviveInProgress || Time.realtimeSinceStartup < _autoReviveNextTime)
+                return;
+            if (PlayerController.Current == null || !SceneManager.GetActiveScene().isLoaded || !IsPlayerDowned())
+                return;
+            RunAutoRevive();
+        }
 
         internal void RunAutoRevive()
         {
-            if (_busy) return;
+            if (_autoReviveInProgress) return;
+            _autoReviveInProgress = true;
+            _autoReviveNextTime = Time.realtimeSinceStartup + AutoReviveCooldown;
+            Status = "Reviving...";
             MelonCoroutines.Start(DoRevive());
         }
 
         private System.Collections.IEnumerator DoRevive()
         {
-            _busy = true;
-            Status = "Reviving...";
-            yield return null; // one frame
+            yield return null; // let the downed/player state settle for one frame
 
             var pc = PlayerController.Current as PlayerCharacter;
             if ((object)pc == null)
             {
                 Status = "No local player";
-                _busy = false;
+                _autoReviveInProgress = false;
+                yield break;
+            }
+
+            // Prefer the game's revive action so its own orb consumption and state
+            // transitions run. Discover it at runtime to avoid a hard dependency on
+            // the optional Adonai mod assembly.
+            Task reviveTask = null;
+            bool actionFound = false;
+            try
+            {
+                MethodInfo action = FindReviveAction();
+                if (action != null)
+                {
+                    reviveTask = action.Invoke(null, null) as Task;
+                    actionFound = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning("revive failed: " + ex.GetBaseException().Message);
+            }
+            if (actionFound && reviveTask != null)
+            {
+                while (!reviveTask.IsCompleted) yield return null;
+                if (!reviveTask.IsFaulted && !reviveTask.IsCanceled)
+                {
+                    Status = "Revived!";
+                    MelonLogger.Msg("[Revive] " + Status);
+                    _autoReviveInProgress = false;
+                    yield break;
+                }
+                Exception taskError = reviveTask.Exception;
+                MelonLogger.Warning("revive failed: " + (taskError == null ? "task was canceled" : taskError.GetBaseException().Message));
+            }
+            else if (actionFound)
+            {
+                // The action completed synchronously (or returned no Task).
+                Status = "Revived!";
+                MelonLogger.Msg("[Revive] " + Status);
+                _autoReviveInProgress = false;
                 yield break;
             }
 
@@ -4526,7 +4596,61 @@ namespace TavernFun
 
             Status = anySuccess ? "Revived!" : "Revive attempted (no orbs found, state forced)";
             MelonLogger.Msg("[Revive] " + Status);
-            _busy = false;
+            _autoReviveInProgress = false;
+        }
+
+        private static MethodInfo FindReviveAction()
+        {
+            if (_reviveAction != null) return _reviveAction;
+            Type actionsType = AccessTools.TypeByName("AdonaiUnifiedMod.Actions");
+            if (actionsType == null)
+            {
+                Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+                for (int i = 0; i < assemblies.Length && actionsType == null; i++)
+                {
+                    try { actionsType = assemblies[i].GetType("AdonaiUnifiedMod.Actions", false); }
+                    catch { }
+                }
+            }
+            if (actionsType == null) return null;
+            _reviveAction = AccessTools.Method(actionsType, "revive", Type.EmptyTypes);
+            return _reviveAction;
+        }
+
+        private static bool IsPlayerDowned()
+        {
+            PlayerController playerController = PlayerController.Current;
+            if (playerController == null) return false;
+            try
+            {
+                Type downedType = AccessTools.TypeByName("Township.Downed.DownedCharacter")
+                    ?? AccessTools.TypeByName("DownedCharacter");
+                if (downedType != null)
+                {
+                    Component downed = playerController.GetComponent(downedType);
+                    if (downed != null)
+                    {
+                        PropertyInfo property = downedType.GetProperty("IsDowned", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (property != null && property.PropertyType == typeof(bool))
+                            return (bool)property.GetValue(downed, null);
+                        FieldInfo field = downedType.GetField("IsDowned", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                            ?? downedType.GetField("isDowned", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                            ?? downedType.GetField("_isDowned", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (field != null && field.FieldType == typeof(bool))
+                            return (bool)field.GetValue(downed);
+                    }
+                }
+                PropertyInfo playerState = playerController.GetType().GetProperty("PlayerState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (playerState != null)
+                {
+                    object state = playerState.GetValue(playerController, null);
+                    string stateName = state == null ? null : state.ToString();
+                    if (!string.IsNullOrEmpty(stateName) && stateName.IndexOf("Downed", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+                }
+            }
+            catch { }
+            return false;
         }
     }
     internal sealed class SpiderController
