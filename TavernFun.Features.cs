@@ -1575,15 +1575,18 @@ namespace TavernFun
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
             GUILayout.BeginHorizontal();
-            Rect climbEverythingRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
-            bool climbEverythingEnabled = ClimbEverythingPatch.Enabled;
-            if (DrawGoldButton(climbEverythingRect, "Climb Everything", climbEverythingEnabled, false))
-                ClimbEverythingPatch.SetEnabled(!climbEverythingEnabled);
+            Rect grabAnywhereRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(grabAnywhereRect, "Grab Anywhere", ClimbEverythingPatch.GrabAnywhereEnabled, false))
+                ClimbEverythingPatch.SetGrabAnywhereEnabled(!ClimbEverythingPatch.GrabAnywhereEnabled);
             GUILayout.FlexibleSpace();
+            Rect grabAnythingRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(grabAnythingRect, "Grab Anything", ClimbEverythingPatch.GrabAnythingEnabled, false))
+                ClimbEverythingPatch.SetGrabAnythingEnabled(!ClimbEverythingPatch.GrabAnythingEnabled);
+            GUILayout.EndHorizontal();
+            GUILayout.Space(6f);
             Rect devToolsRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
             if (DrawGoldButton(devToolsRect, "Dev Tools", _devToolsMenuOpen, false))
                 _devToolsMenuOpen = true;
-            GUILayout.EndHorizontal();
             GUILayout.Space(6f);
             GUILayout.BeginHorizontal();
             Rect espButton = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
@@ -7335,6 +7338,26 @@ namespace TavernFun
     }
 
     [HarmonyPatch]
+    internal static class ClimbingHandlerLayerMaskPatch
+    {
+        private static MethodBase TargetMethod()
+        {
+            Type type = ClimbEverythingPatch.FindGameType("Features.Climbing.ClimbingHandler", "ClimbingHandler");
+            PropertyInfo property = type == null ? null : AccessTools.Property(type, "LayerMask");
+            return property == null ? null : property.GetGetMethod(true);
+        }
+
+        [HarmonyPostfix]
+        private static void Postfix(ref LayerMask __result)
+        {
+            if (!ClimbEverythingPatch.ExpandClimbMask) return;
+            LayerMask allLayers = new LayerMask();
+            allLayers.value = -1;
+            __result = allLayers;
+        }
+    }
+
+    [HarmonyPatch]
     internal static class ClimbEverythingPatch
     {
         private sealed class AirAnchor
@@ -7346,8 +7369,12 @@ namespace TavernFun
 
         private static readonly Dictionary<object, AirAnchor> Anchors = new Dictionary<object, AirAnchor>();
         private static bool _reportedSetupFailure;
-        internal static bool Enabled;
+        private static int _grabAnythingCheckDepth;
+        internal static bool GrabAnywhereEnabled;
+        internal static bool GrabAnythingEnabled;
+        internal static bool Enabled { get { return GrabAnywhereEnabled || GrabAnythingEnabled; } }
         internal static bool BypassUnlockChecks;
+        internal static bool ExpandClimbMask { get { return GrabAnythingEnabled && _grabAnythingCheckDepth > 0; } }
 
         private static MethodBase TargetMethod()
         {
@@ -7395,22 +7422,41 @@ namespace TavernFun
             catch { }
         }
 
-        internal static void SetEnabled(bool enabled)
+        internal static void SetGrabAnywhereEnabled(bool enabled)
         {
-            Enabled = enabled;
+            GrabAnywhereEnabled = enabled;
             if (!enabled) DisableUnusedAnchors();
-            MelonLogger.Msg("[Climb Everything] " + (enabled ? "enabled" : "disabled"));
+            MelonLogger.Msg("[Grab Anywhere] " + (enabled ? "enabled" : "disabled"));
+        }
+
+        internal static void SetGrabAnythingEnabled(bool enabled)
+        {
+            GrabAnythingEnabled = enabled;
+            if (!enabled && !GrabAnywhereEnabled) DisableUnusedAnchors();
+            MelonLogger.Msg("[Grab Anything] " + (enabled ? "enabled" : "disabled"));
         }
 
         internal static void Tick()
         {
-            if (!Enabled) DisableUnusedAnchors();
+            if (!GrabAnywhereEnabled) DisableUnusedAnchors();
+        }
+
+        internal static void EnterGrabAnythingCheck()
+        {
+            if (GrabAnythingEnabled) _grabAnythingCheckDepth++;
+        }
+
+        internal static void ExitGrabAnythingCheck(bool wasEnabled)
+        {
+            if (wasEnabled && _grabAnythingCheckDepth > 0) _grabAnythingCheckDepth--;
         }
 
         [HarmonyPrefix]
-        private static void Prefix(object __instance, object[] __args)
+        private static void Prefix(object __instance, object[] __args, out bool __state)
         {
-            if (!Enabled || __instance == null) return;
+            __state = GrabAnythingEnabled;
+            EnterGrabAnythingCheck();
+            if (!GrabAnywhereEnabled || __instance == null) return;
             try
             {
                 object controller = ReadMember(__instance, "Controller");
@@ -7456,16 +7502,20 @@ namespace TavernFun
             }
         }
 
-        [HarmonyPostfix]
-        private static void Postfix(object __instance)
+        [HarmonyFinalizer]
+        private static Exception Finalizer(object __instance, bool __state, Exception __exception)
         {
-            if (__instance == null) return;
-            AirAnchor anchor;
-            if (Anchors.TryGetValue(__instance, out anchor) && anchor != null && anchor.Collider != null)
+            ExitGrabAnythingCheck(__state);
+            if (__instance != null)
             {
-                anchor.Collider.enabled = false;
-                if (!Enabled && !IsHandClimbing(__instance)) RemoveAnchor(__instance, anchor);
+                AirAnchor anchor;
+                if (Anchors.TryGetValue(__instance, out anchor) && anchor != null && anchor.Collider != null && anchor.Collider.enabled)
+                {
+                    anchor.Collider.enabled = false;
+                    if (!GrabAnywhereEnabled && !IsHandClimbing(__instance)) RemoveAnchor(__instance, anchor);
+                }
             }
+            return __exception;
         }
 
         private static AirAnchor GetOrCreateAnchor(object hand, int layer, float grabRadius)
