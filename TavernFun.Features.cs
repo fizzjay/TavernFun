@@ -7214,6 +7214,127 @@ namespace TavernFun
     }
 
     [HarmonyPatch]
+    internal static class ClimbingHandProcessUnlockPatch
+    {
+        private static readonly Dictionary<object, object> OriginalUnlocks = new Dictionary<object, object>();
+        private static bool _reportedReadOnlyUnlock;
+
+        private static MethodBase TargetMethod()
+        {
+            Type type = ClimbEverythingPatch.FindGameType("Features.Climbing.ClimbingHand", "ClimbingHand");
+            return type == null ? null : AccessTools.Method(type, "Process", new Type[] { typeof(bool) });
+        }
+
+        [HarmonyPrefix]
+        private static void Prefix(object __instance, ref bool hasStamina)
+        {
+            if (!ClimbEverythingPatch.Enabled || __instance == null) return;
+            hasStamina = true;
+            ClimbEverythingPatch.BypassUnlockChecks = true;
+            try
+            {
+                FieldInfo unlock = AccessTools.Field(__instance.GetType(), "unlock");
+                if (unlock == null || unlock.GetValue(__instance) == null) return;
+                object original = unlock.GetValue(__instance);
+                unlock.SetValue(__instance, null);
+                OriginalUnlocks[__instance] = original;
+            }
+            catch (Exception ex)
+            {
+                if (!_reportedReadOnlyUnlock)
+                {
+                    _reportedReadOnlyUnlock = true;
+                    MelonLogger.Warning("[Climb Everything] Could not bypass the hand's climb unlock: " + ex.GetBaseException().Message);
+                }
+            }
+        }
+
+        [HarmonyPostfix]
+        private static void Postfix(object __instance)
+        {
+            RestoreUnlock(__instance);
+            ClimbEverythingPatch.BypassUnlockChecks = false;
+        }
+
+        [HarmonyFinalizer]
+        private static Exception Finalizer(object __instance, Exception __exception)
+        {
+            RestoreUnlock(__instance);
+            ClimbEverythingPatch.BypassUnlockChecks = false;
+            return __exception;
+        }
+
+        private static void RestoreUnlock(object instance)
+        {
+            if (instance == null) return;
+            object original;
+            if (!OriginalUnlocks.TryGetValue(instance, out original)) return;
+            OriginalUnlocks.Remove(instance);
+            try
+            {
+                FieldInfo unlock = AccessTools.Field(instance.GetType(), "unlock");
+                if (unlock != null) unlock.SetValue(instance, original);
+            }
+            catch { }
+        }
+    }
+
+    [HarmonyPatch]
+    internal static class ClimbingHandBreakGripPatch
+    {
+        private static MethodBase TargetMethod()
+        {
+            Type type = ClimbEverythingPatch.FindGameType("Features.Climbing.ClimbingHand", "ClimbingHand");
+            return type == null ? null : AccessTools.Method(type, "BreakGrip", new Type[] { typeof(bool) });
+        }
+
+        [HarmonyPrefix]
+        private static bool Prefix(bool isVoluntary)
+        {
+            return !ClimbEverythingPatch.Enabled || isVoluntary;
+        }
+    }
+
+    [HarmonyPatch]
+    internal static class PlayerUnlockManagerCheckPatch
+    {
+        private static MethodBase TargetMethod()
+        {
+            Type type = ClimbEverythingPatch.FindGameType("Alta.Character.PlayerUnlockManager", "PlayerUnlockManager");
+            if (type == null) return null;
+            MethodInfo[] methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            for (int i = 0; i < methods.Length; i++)
+            {
+                if (methods[i].Name != "Check" || methods[i].ReturnType != typeof(bool)) continue;
+                ParameterInfo[] parameters = methods[i].GetParameters();
+                if (parameters.Length == 1 && parameters[0].ParameterType.Name == "PlayerUnlock") return methods[i];
+            }
+            return null;
+        }
+
+        [HarmonyPrefix]
+        private static bool Prefix(ref bool __result)
+        {
+            if (!ClimbEverythingPatch.Enabled || !ClimbEverythingPatch.BypassUnlockChecks) return true;
+            __result = true;
+            return false;
+        }
+    }
+
+    [HarmonyPatch]
+    internal static class HandStaminaManagerProcessPatch
+    {
+        private static MethodBase TargetMethod()
+        {
+            Type type = ClimbEverythingPatch.FindGameType("Features.Climbing.HandStaminaManager", "HandStaminaManager");
+            return type == null ? null : AccessTools.Method(type, "Process", Type.EmptyTypes);
+        }
+
+        [HarmonyPostfix]
+        private static void Postfix(object __instance) { ClimbEverythingPatch.RefillStamina(__instance); }
+    }
+
+    [HarmonyPatch]
     internal static class ClimbEverythingPatch
     {
         private sealed class AirAnchor
@@ -7226,25 +7347,52 @@ namespace TavernFun
         private static readonly Dictionary<object, AirAnchor> Anchors = new Dictionary<object, AirAnchor>();
         private static bool _reportedSetupFailure;
         internal static bool Enabled;
+        internal static bool BypassUnlockChecks;
 
         private static MethodBase TargetMethod()
         {
-            Type handType = AccessTools.TypeByName("Features.Climbing.ClimbingHand");
-            if (handType == null)
+            Type handType = FindGameType("Features.Climbing.ClimbingHand", "ClimbingHand");
+            return handType == null ? null : AccessTools.Method(handType, "CheckGrab", new Type[] { typeof(float) });
+        }
+
+        internal static Type FindGameType(string fullName, string shortName)
+        {
+            Type type = AccessTools.TypeByName(fullName);
+            if (type != null) return type;
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
             {
-                Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
-                for (int i = 0; i < assemblies.Length && handType == null; i++)
+                try
                 {
-                    try
+                    Type[] types = assemblies[i].GetTypes();
+                    for (int j = 0; j < types.Length; j++)
                     {
-                        Type[] types = assemblies[i].GetTypes();
-                        for (int j = 0; j < types.Length; j++)
-                            if (types[j] != null && types[j].Name == "ClimbingHand") { handType = types[j]; break; }
+                        if (types[j] != null && types[j].Name == shortName) return types[j];
                     }
-                    catch { }
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        internal static void RefillStamina(object staminaManager)
+        {
+            if (!Enabled || staminaManager == null) return;
+            object stat = ReadMember(staminaManager, "stamina");
+            if (stat == null) return;
+            float maximum = ReadFloat(stat, "Maximum", -1f);
+            if (maximum < 0f) return;
+            try
+            {
+                PropertyInfo property = AccessTools.Property(stat.GetType(), "Base");
+                if (property != null && property.CanWrite) property.SetValue(stat, Convert.ChangeType(maximum, property.PropertyType), null);
+                else
+                {
+                    FieldInfo field = AccessTools.Field(stat.GetType(), "Base");
+                    if (field != null) field.SetValue(stat, Convert.ChangeType(maximum, field.FieldType));
                 }
             }
-            return handType == null ? null : AccessTools.Method(handType, "CheckGrab", new Type[] { typeof(float) });
+            catch { }
         }
 
         internal static void SetEnabled(bool enabled)
