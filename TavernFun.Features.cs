@@ -271,6 +271,7 @@ namespace TavernFun
             _tpEffects.Tick();
             _revive.Tick();
             _worldTools.Tick();
+            ClimbEverythingPatch.Tick();
         }
         public void LateUpdate()
         {
@@ -1573,9 +1574,16 @@ namespace TavernFun
             }
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
+            GUILayout.BeginHorizontal();
+            Rect climbEverythingRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            bool climbEverythingEnabled = ClimbEverythingPatch.Enabled;
+            if (DrawGoldButton(climbEverythingRect, "Climb Everything", climbEverythingEnabled, false))
+                ClimbEverythingPatch.SetEnabled(!climbEverythingEnabled);
+            GUILayout.FlexibleSpace();
             Rect devToolsRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
             if (DrawGoldButton(devToolsRect, "Dev Tools", _devToolsMenuOpen, false))
                 _devToolsMenuOpen = true;
+            GUILayout.EndHorizontal();
             GUILayout.Space(6f);
             GUILayout.BeginHorizontal();
             Rect espButton = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
@@ -7202,6 +7210,202 @@ namespace TavernFun
             }
             catch { }
             return null;
+        }
+    }
+
+    [HarmonyPatch]
+    internal static class ClimbEverythingPatch
+    {
+        private sealed class AirAnchor
+        {
+            internal object Hand;
+            internal GameObject GameObject;
+            internal SphereCollider Collider;
+        }
+
+        private static readonly Dictionary<object, AirAnchor> Anchors = new Dictionary<object, AirAnchor>();
+        private static bool _reportedSetupFailure;
+        internal static bool Enabled;
+
+        private static MethodBase TargetMethod()
+        {
+            Type handType = AccessTools.TypeByName("Features.Climbing.ClimbingHand");
+            if (handType == null)
+            {
+                Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+                for (int i = 0; i < assemblies.Length && handType == null; i++)
+                {
+                    try
+                    {
+                        Type[] types = assemblies[i].GetTypes();
+                        for (int j = 0; j < types.Length; j++)
+                            if (types[j] != null && types[j].Name == "ClimbingHand") { handType = types[j]; break; }
+                    }
+                    catch { }
+                }
+            }
+            return handType == null ? null : AccessTools.Method(handType, "CheckGrab", new Type[] { typeof(float) });
+        }
+
+        internal static void SetEnabled(bool enabled)
+        {
+            Enabled = enabled;
+            if (!enabled) DisableUnusedAnchors();
+            MelonLogger.Msg("[Climb Everything] " + (enabled ? "enabled" : "disabled"));
+        }
+
+        internal static void Tick()
+        {
+            if (!Enabled) DisableUnusedAnchors();
+        }
+
+        [HarmonyPrefix]
+        private static void Prefix(object __instance, object[] __args)
+        {
+            if (!Enabled || __instance == null) return;
+            try
+            {
+                object controller = ReadMember(__instance, "Controller");
+                Transform gripPoint = ReadMember(controller, "GripPoint") as Transform;
+                Transform shoulder = ReadMember(__instance, "shoulder") as Transform;
+                object handler = ReadMember(__instance, "handler");
+                object settings = ReadMember(handler, "Settings");
+                if (gripPoint == null || shoulder == null || settings == null) return;
+
+                float hangDistance = ReadFloat(settings, "HangDistance", 1.5f);
+                float armReduce = __args != null && __args.Length > 0 ? Convert.ToSingle(__args[0]) : 0f;
+                Vector3 grabPoint = gripPoint.position;
+                Vector3 shoulderToHand = grabPoint - shoulder.position;
+                if (shoulderToHand.sqrMagnitude > hangDistance * hangDistance)
+                    grabPoint = shoulder.position + shoulderToHand.normalized * (hangDistance - armReduce);
+                else if (armReduce > 0f)
+                    grabPoint = shoulder.position + shoulderToHand - shoulderToHand.normalized * armReduce;
+
+                int layer = GetClimbLayer(handler, settings);
+                if (layer < 0)
+                {
+                    if (!_reportedSetupFailure)
+                    {
+                        _reportedSetupFailure = true;
+                        MelonLogger.Warning("[Climb Everything] The active climb layer mask was unavailable.");
+                    }
+                    return;
+                }
+                float grabRadius = ReadFloat(settings, "GrabRadius", 0.12f);
+                AirAnchor anchor = GetOrCreateAnchor(__instance, layer, grabRadius);
+                if (anchor == null || anchor.Collider == null) return;
+                anchor.GameObject.transform.position = grabPoint;
+                anchor.Collider.enabled = true;
+                Physics.SyncTransforms();
+            }
+            catch (Exception ex)
+            {
+                if (!_reportedSetupFailure)
+                {
+                    _reportedSetupFailure = true;
+                    MelonLogger.Warning("[Climb Everything] Could not prepare an air grip: " + ex.GetBaseException().Message);
+                }
+            }
+        }
+
+        [HarmonyPostfix]
+        private static void Postfix(object __instance)
+        {
+            if (__instance == null) return;
+            AirAnchor anchor;
+            if (Anchors.TryGetValue(__instance, out anchor) && anchor != null && anchor.Collider != null)
+            {
+                anchor.Collider.enabled = false;
+                if (!Enabled && !IsHandClimbing(__instance)) RemoveAnchor(__instance, anchor);
+            }
+        }
+
+        private static AirAnchor GetOrCreateAnchor(object hand, int layer, float grabRadius)
+        {
+            AirAnchor anchor;
+            if (Anchors.TryGetValue(hand, out anchor) && anchor != null && anchor.GameObject != null)
+            {
+                anchor.GameObject.layer = layer;
+                anchor.Collider.radius = Mathf.Clamp(grabRadius * 0.5f, 0.05f, 0.2f);
+                return anchor;
+            }
+            GameObject gameObject = new GameObject("TavernFun_AirClimbAnchor");
+            gameObject.layer = layer;
+            SphereCollider collider = gameObject.AddComponent<SphereCollider>();
+            collider.radius = Mathf.Clamp(grabRadius * 0.5f, 0.05f, 0.2f);
+            anchor = new AirAnchor { Hand = hand, GameObject = gameObject, Collider = collider };
+            Anchors[hand] = anchor;
+            return anchor;
+        }
+
+        private static int GetClimbLayer(object handler, object settings)
+        {
+            object value = ReadMember(handler, "LayerMask");
+            if (value == null) value = ReadMember(settings, "LayerMask");
+            int mask = 0;
+            if (value is LayerMask) mask = ((LayerMask)value).value;
+            else if (value is int) mask = (int)value;
+            else if (value != null)
+            {
+                object raw = ReadMember(value, "value");
+                if (raw != null) mask = Convert.ToInt32(raw);
+            }
+            for (int i = 0; i < 32; i++)
+                if ((mask & (1 << i)) != 0) return i;
+            return -1;
+        }
+
+        private static float ReadFloat(object target, string name, float fallback)
+        {
+            object value = ReadMember(target, name);
+            if (value == null) return fallback;
+            try { return Convert.ToSingle(value); }
+            catch { return fallback; }
+        }
+
+        private static object ReadMember(object target, string name)
+        {
+            if (target == null) return null;
+            Type type = target.GetType();
+            try
+            {
+                PropertyInfo property = AccessTools.Property(type, name);
+                if (property != null) return property.GetValue(target, null);
+                FieldInfo field = AccessTools.Field(type, name);
+                if (field != null) return field.GetValue(target);
+            }
+            catch { }
+            return null;
+        }
+
+        private static bool IsHandClimbing(object hand)
+        {
+            object climbing = ReadMember(hand, "IsClimbing");
+            return climbing is bool && (bool)climbing;
+        }
+
+        private static void DisableUnusedAnchors()
+        {
+            List<object> remove = new List<object>();
+            foreach (KeyValuePair<object, AirAnchor> pair in Anchors)
+            {
+                AirAnchor anchor = pair.Value;
+                if (anchor == null || anchor.GameObject == null || !IsHandClimbing(pair.Key))
+                    remove.Add(pair.Key);
+                else if (anchor.Collider != null)
+                    anchor.Collider.enabled = false;
+            }
+            for (int i = 0; i < remove.Count; i++)
+            {
+                AirAnchor anchor;
+                if (Anchors.TryGetValue(remove[i], out anchor)) RemoveAnchor(remove[i], anchor);
+            }
+        }
+
+        private static void RemoveAnchor(object key, AirAnchor anchor)
+        {
+            if (anchor != null && anchor.GameObject != null) UnityEngine.Object.Destroy(anchor.GameObject);
+            Anchors.Remove(key);
         }
     }
 
