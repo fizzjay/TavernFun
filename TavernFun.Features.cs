@@ -159,6 +159,11 @@ namespace TavernFun
         private Vector2 _worldToolsPlayersScroll;
         private string _espSearchInput = "";
         private string _customTeleportInput = "";
+        private bool _arrowSettingsMenuOpen;
+        private Vector2 _arrowSettingsMenuPosition = new Vector2(620f, 100f);
+        private bool _isDraggingArrowSettingsMenu;
+        private Vector2 _dragOffsetArrowSettingsMenu;
+        private Rect _lastArrowSettingsMenuRect;
         private Vector2 _fovMenuPosition = new Vector2(360f, 40f);
         private Rect _lastFovMenuRect;
         private bool _isDraggingFovMenu;
@@ -258,7 +263,7 @@ namespace TavernFun
         public void Update()
         {
             if (_input.IsMenuTogglePressed) { IsVisible = !IsVisible; }
-            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen || _arrowSettingsMenuOpen;
             _flatscreen.Tick();
             _weather.Tick();
             _graphics.Tick();
@@ -272,6 +277,7 @@ namespace TavernFun
             _revive.Tick();
             _worldTools.Tick();
             ClimbEverythingPatch.Tick();
+            ArrowThrowController.Tick();
         }
         public void LateUpdate()
         {
@@ -351,6 +357,7 @@ namespace TavernFun
                 }
                 if (_espMenuOpen) DrawEspMenu();
                 if (_teleportsMenuOpen) DrawTeleportsMenu();
+                if (_arrowSettingsMenuOpen) DrawArrowSettingsMenu();
                 IsPointerOverUI = (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                                                 || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
                                                 || (_grabMenuOpen && _lastGrabMenuRect.Contains(mousePos))
@@ -365,8 +372,9 @@ namespace TavernFun
                                                 || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
                                                 || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos))
                                                 || (_espMenuOpen && _lastEspMenuRect.Contains(mousePos))
-                                                || (_teleportsMenuOpen && _lastTeleportsMenuRect.Contains(mousePos));
-                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen;
+                                                || (_teleportsMenuOpen && _lastTeleportsMenuRect.Contains(mousePos))
+                                                || (_arrowSettingsMenuOpen && _lastArrowSettingsMenuRect.Contains(mousePos));
+                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen || _arrowSettingsMenuOpen;
                 DevToolsDebugOverlay.Draw();
                 return;
             }
@@ -491,8 +499,9 @@ namespace TavernFun
                             || (_fovMenuOpen && _lastFovMenuRect.Contains(mousePos))
                             || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos))
                             || (_espMenuOpen && _lastEspMenuRect.Contains(mousePos))
-                            || (_teleportsMenuOpen && _lastTeleportsMenuRect.Contains(mousePos));
-            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen;
+                            || (_teleportsMenuOpen && _lastTeleportsMenuRect.Contains(mousePos))
+                            || (_arrowSettingsMenuOpen && _lastArrowSettingsMenuRect.Contains(mousePos));
+            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen || _arrowSettingsMenuOpen;
             DevToolsDebugOverlay.Draw();
         }
 
@@ -1584,9 +1593,17 @@ namespace TavernFun
                 ClimbEverythingPatch.SetGrabAnythingEnabled(!ClimbEverythingPatch.GrabAnythingEnabled);
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
+            GUILayout.BeginHorizontal();
             Rect devToolsRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
             if (DrawGoldButton(devToolsRect, "Dev Tools", _devToolsMenuOpen, false))
                 _devToolsMenuOpen = true;
+            GUILayout.FlexibleSpace();
+            Rect arrowThrowRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            bool arrowSettingsRightClick = WasRightClicked(arrowThrowRect);
+            bool arrowThrowLeftClick = DrawGoldButton(arrowThrowRect, "Arrow Throw", ArrowThrowController.Enabled, false);
+            if (arrowSettingsRightClick) _arrowSettingsMenuOpen = true;
+            else if (arrowThrowLeftClick) ArrowThrowController.SetEnabled(!ArrowThrowController.Enabled);
+            GUILayout.EndHorizontal();
             GUILayout.Space(6f);
             GUILayout.BeginHorizontal();
             Rect espButton = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
@@ -1595,6 +1612,44 @@ namespace TavernFun
             Rect teleportsButton = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
             if (DrawGoldButton(teleportsButton, "Teleports", _teleportsMenuOpen, false)) _teleportsMenuOpen = true;
             GUILayout.EndHorizontal();
+        }
+
+        private void DrawArrowSettingsMenu()
+        {
+            EnsureStyles();
+            const int width = 300;
+            const int height = 280;
+            Rect outer = new Rect(_arrowSettingsMenuPosition.x, _arrowSettingsMenuPosition.y, width, height);
+            _lastArrowSettingsMenuRect = outer;
+            GUI.DrawTexture(new Rect(outer.x + 4f, outer.y + 5f, outer.width, outer.height), _outerShadowTexture, ScaleMode.StretchToFill);
+            GUI.DrawTexture(outer, _outerFrameTexture, ScaleMode.StretchToFill);
+            Rect title = new Rect(outer.x + OuterFramePadding, outer.y + OuterFramePadding, outer.width - OuterFramePadding * 2f, TitleBarHeight);
+            GUI.DrawTexture(title, _titleBarTexture, ScaleMode.StretchToFill);
+            GUI.Label(new Rect(title.x, title.y + 1f, title.width, title.height), "ARROW SETTINGS", _titleShadowStyle);
+            GUI.Label(title, "ARROW SETTINGS", _titleLabelStyle);
+            HandleDrag(title, ref _arrowSettingsMenuPosition, ref _isDraggingArrowSettingsMenu, ref _dragOffsetArrowSettingsMenu);
+            Rect inner = new Rect(outer.x + OuterFramePadding, title.yMax + 4f, outer.width - OuterFramePadding * 2f, outer.height - TitleBarHeight - 14f);
+            GUI.DrawTexture(inner, _innerBackgroundTexture, ScaleMode.StretchToFill);
+            GUILayout.BeginArea(inner);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Right-click Arrow Throw to open this", _panelHeaderStyle);
+            GUILayout.FlexibleSpace();
+            Rect close = GUILayoutUtility.GetRect(58f, ActionButtonHeight, GUILayout.Width(58f));
+            if (DrawGoldButton(close, "Close", false, false)) _arrowSettingsMenuOpen = false;
+            GUILayout.EndHorizontal();
+            GUILayout.Space(4f);
+            Rect preview = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.ExpandWidth(true));
+            if (DrawGoldButton(preview, ArrowThrowController.PreviewEnabled ? "Trajectory Preview: On" : "Trajectory Preview: Off", ArrowThrowController.PreviewEnabled, false))
+                ArrowThrowController.PreviewEnabled = !ArrowThrowController.PreviewEnabled;
+            GUILayout.Label("Throw speed: " + ArrowThrowController.ThrowSpeed.ToString("0.0"), _labelStyle);
+            ArrowThrowController.ThrowSpeed = GUILayout.HorizontalSlider(ArrowThrowController.ThrowSpeed, 5f, 100f);
+            GUILayout.Label("Hand sensitivity: " + ArrowThrowController.Sensitivity.ToString("0.0"), _labelStyle);
+            ArrowThrowController.Sensitivity = GUILayout.HorizontalSlider(ArrowThrowController.Sensitivity, 0f, 5f);
+            GUILayout.Label("Gravity: " + ArrowThrowController.GravityScale.ToString("0.0"), _labelStyle);
+            ArrowThrowController.GravityScale = GUILayout.HorizontalSlider(ArrowThrowController.GravityScale, 0f, 2f);
+            GUILayout.Label("Preview time: " + ArrowThrowController.PreviewDuration.ToString("0.0") + "s", _labelStyle);
+            ArrowThrowController.PreviewDuration = GUILayout.HorizontalSlider(ArrowThrowController.PreviewDuration, 0.5f, 4f);
+            GUILayout.EndArea();
         }
 
         private void DrawEspMenu()
@@ -7209,6 +7264,410 @@ namespace TavernFun
                 PropertyInfo property = AccessTools.Property(type, name);
                 if (property != null) return property.GetValue(target, null);
                 FieldInfo field = AccessTools.Field(type, name);
+                if (field != null) return field.GetValue(target);
+            }
+            catch { }
+            return null;
+        }
+    }
+
+    internal static class ArrowThrowController
+    {
+        private sealed class ArrowTrack
+        {
+            internal Component Throwable;
+            internal Component Arrow;
+            internal Vector3 LastPosition;
+            internal Vector3 HandVelocity;
+            internal float LastSampleTime;
+            internal bool WasHeld;
+            internal GameObject PreviewObject;
+            internal LineRenderer PreviewLine;
+        }
+
+        private static readonly Dictionary<int, ArrowTrack> Tracks = new Dictionary<int, ArrowTrack>();
+        private static readonly List<Component> ThrowableComponents = new List<Component>();
+        private static readonly List<int> StaleTrackIds = new List<int>();
+        private static Type _throwableType;
+        private static Material _previewMaterial;
+        private static float _nextDiscoveryTime;
+        private static bool _warnedThrowFailure;
+
+        internal static bool Enabled;
+        internal static bool PreviewEnabled = true;
+        internal static float ThrowSpeed = 42f;
+        internal static float Sensitivity = 2.5f;
+        internal static float GravityScale = 1f;
+        internal static float PreviewDuration = 2f;
+        private const int PreviewSegments = 32;
+
+        internal static void SetEnabled(bool enabled)
+        {
+            Enabled = enabled;
+            if (!enabled) ClearAll();
+            MelonLogger.Msg("[Arrow Throw] " + (enabled ? "enabled" : "disabled"));
+        }
+
+        internal static void Tick()
+        {
+            if (!Enabled)
+            {
+                if (Tracks.Count > 0) ClearAll();
+                return;
+            }
+            if (Time.unscaledTime >= _nextDiscoveryTime) DiscoverThrowables();
+            float now = Time.unscaledTime;
+            for (int i = ThrowableComponents.Count - 1; i >= 0; i--)
+            {
+                Component throwable = ThrowableComponents[i];
+                if (throwable == null || !throwable.gameObject.activeInHierarchy)
+                {
+                    if (throwable != null)
+                    {
+                        Component staleArrow = ReadMember(throwable, "arrow") as Component;
+                        if (staleArrow != null)
+                        {
+                            int staleId = staleArrow.GetInstanceID();
+                            ArrowTrack staleTrack;
+                            if (Tracks.TryGetValue(staleId, out staleTrack)) DestroyPreview(staleTrack);
+                            Tracks.Remove(staleId);
+                        }
+                    }
+                    ThrowableComponents.RemoveAt(i);
+                    continue;
+                }
+                Component arrow = ReadMember(throwable, "arrow") as Component;
+                Component pickup = ReadMember(throwable, "pickup") as Component;
+                if (arrow == null || pickup == null) continue;
+                int id = arrow.GetInstanceID();
+                bool inFlight = ReadBool(arrow, "IsInFlight") || ReadBool(arrow, "HasBeenShot");
+                if (inFlight)
+                {
+                    ArrowTrack firedTrack;
+                    if (Tracks.TryGetValue(id, out firedTrack)) DestroyPreview(firedTrack);
+                    Tracks.Remove(id);
+                    continue;
+                }
+                ArrowTrack track;
+                if (!Tracks.TryGetValue(id, out track))
+                {
+                    track = new ArrowTrack { Throwable = throwable, Arrow = arrow, LastPosition = arrow.transform.position, LastSampleTime = now };
+                    Tracks[id] = track;
+                }
+                bool interacting = ReadBool(pickup, "IsInteractedWith")
+                    || ReadBool(throwable, "IsInteractedWith")
+                    || ReadBool(arrow, "IsInteractedWith");
+                bool docked = ReadBool(pickup, "IsDocked") || ReadBool(throwable, "IsDocked");
+                bool held = interacting && !docked;
+                Vector3 currentPosition = arrow.transform.position;
+                float elapsed = now - track.LastSampleTime;
+                if (track.WasHeld && held && elapsed > 0.0005f && elapsed < 0.25f)
+                {
+                    Vector3 estimate = (currentPosition - track.LastPosition) / elapsed;
+                    if (estimate.sqrMagnitude < 2500f)
+                        track.HandVelocity = Vector3.Lerp(track.HandVelocity, estimate, 0.65f);
+                }
+                else if (!held)
+                {
+                    track.HandVelocity *= 0.8f;
+                }
+                track.LastPosition = currentPosition;
+                track.LastSampleTime = now;
+                track.WasHeld = held;
+                if (held && PreviewEnabled) DrawTrajectory(track);
+                else DestroyPreview(track);
+            }
+            StaleTrackIds.Clear();
+            foreach (KeyValuePair<int, ArrowTrack> item in Tracks)
+                if (item.Value == null || item.Value.Arrow == null || item.Value.Throwable == null) StaleTrackIds.Add(item.Key);
+            for (int i = 0; i < StaleTrackIds.Count; i++)
+            {
+                ArrowTrack stale;
+                if (Tracks.TryGetValue(StaleTrackIds[i], out stale)) DestroyPreview(stale);
+                Tracks.Remove(StaleTrackIds[i]);
+            }
+        }
+
+        internal static bool ThrowArrow(Component arrow, object interactor)
+        {
+            if (!Enabled || arrow == null) return false;
+            try
+            {
+                int id = arrow.GetInstanceID();
+                ArrowTrack track;
+                Tracks.TryGetValue(id, out track);
+                Vector3 handVelocity;
+                if (!TryGetInteractorVelocity(interactor, out handVelocity) && track != null)
+                    handVelocity = track.HandVelocity;
+                Rigidbody body = ReadMember(arrow, "Rigidbody") as Rigidbody;
+                if (body == null) body = arrow.GetComponent<Rigidbody>();
+                if (handVelocity.sqrMagnitude < 0.01f && body != null)
+                    handVelocity = body.velocity;
+                ApplyFlightGravity(arrow);
+                Vector3 velocity = CalculateVelocity(arrow.transform, handVelocity);
+                MethodInfo shoot = AccessTools.Method(arrow.GetType(), "ShootArrowWithVelocity", new Type[] { typeof(Vector3) });
+                if (shoot == null) return false;
+                shoot.Invoke(arrow, new object[] { velocity });
+                if (track != null)
+                {
+                    DestroyPreview(track);
+                    Tracks.Remove(id);
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (!_warnedThrowFailure)
+                {
+                    _warnedThrowFailure = true;
+                    MelonLogger.Warning("[Arrow Throw] Could not throw arrow: " + ex.GetBaseException().Message);
+                }
+                return false;
+            }
+        }
+
+        private static void ApplyFlightGravity(Component arrow)
+        {
+            if (arrow == null) return;
+            object settings = ReadMember(arrow, "flightSettings") ?? ReadMember(arrow, "FlightSettings") ?? ReadMember(arrow, "arrowFlightSettings") ?? ReadMember(arrow, "ArrowFlightSettings");
+            if (settings == null)
+            {
+                FieldInfo[] fields = arrow.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                for (int i = 0; i < fields.Length; i++)
+                {
+                    if (fields[i].FieldType.Name != "ArrowFlightSettings") continue;
+                    try { settings = fields[i].GetValue(arrow); } catch { }
+                    if (settings != null) break;
+                }
+            }
+            if (settings == null) settings = arrow;
+            string[] names = new string[] { "GravityScale", "gravityScale", "GravityMultiplier", "gravityMultiplier", "Gravity", "gravity" };
+            for (int i = 0; i < names.Length; i++)
+            {
+                PropertyInfo property = AccessTools.Property(settings.GetType(), names[i]);
+                FieldInfo field = AccessTools.Field(settings.GetType(), names[i]);
+                Type valueType = property != null ? property.PropertyType : (field != null ? field.FieldType : null);
+                if (valueType == null) continue;
+                object value = null;
+                bool scale = names[i].IndexOf("Scale", StringComparison.OrdinalIgnoreCase) >= 0 || names[i].IndexOf("Multiplier", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (valueType == typeof(float)) value = scale ? GravityScale : Physics.gravity.magnitude * GravityScale;
+                else if (valueType == typeof(double)) value = (double)(scale ? GravityScale : Physics.gravity.magnitude * GravityScale);
+                else if (valueType == typeof(Vector3)) value = Physics.gravity * GravityScale;
+                if (value == null) continue;
+                try
+                {
+                    if (property != null && property.GetSetMethod(true) != null) property.SetValue(settings, value, null);
+                    else if (field != null && !field.IsInitOnly) field.SetValue(settings, value);
+                    else continue;
+                    return;
+                }
+                catch { }
+            }
+        }
+
+        private static Vector3 CalculateVelocity(Transform arrowTransform, Vector3 handVelocity)
+        {
+            Vector3 direction = arrowTransform == null ? Vector3.forward : arrowTransform.forward;
+            if (direction.sqrMagnitude < 0.001f) direction = Vector3.forward;
+            direction.Normalize();
+            Vector3 velocity = direction * Mathf.Clamp(ThrowSpeed, 1f, 150f) + handVelocity * Mathf.Clamp(Sensitivity, 0f, 8f);
+            float maximum = Mathf.Max(150f, ThrowSpeed * 4f);
+            if (velocity.magnitude > maximum) velocity = velocity.normalized * maximum;
+            return velocity;
+        }
+
+        private static void DiscoverThrowables()
+        {
+            _nextDiscoveryTime = Time.unscaledTime + 0.2f;
+            if (_throwableType == null)
+                _throwableType = AccessTools.TypeByName("ThrowableArrow") ?? FindTypeByName("ThrowableArrow");
+            if (_throwableType == null) return;
+            ThrowableComponents.Clear();
+            UnityEngine.Object[] found;
+            try { found = Resources.FindObjectsOfTypeAll(_throwableType); }
+            catch { return; }
+            for (int i = 0; i < found.Length; i++)
+            {
+                Component component = found[i] as Component;
+                if (component != null && component.gameObject.activeInHierarchy && component.gameObject.scene.IsValid())
+                    ThrowableComponents.Add(component);
+            }
+        }
+
+        private static Type FindTypeByName(string name)
+        {
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                try
+                {
+                    Type[] types = assemblies[i].GetTypes();
+                    for (int j = 0; j < types.Length; j++)
+                        if (types[j] != null && types[j].Name == name) return types[j];
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        private static bool TryGetInteractorVelocity(object interactor, out Vector3 velocity)
+        {
+            velocity = Vector3.zero;
+            object current = interactor;
+            string[] names = new string[] { "Velocity", "velocity", "LinearVelocity", "linearVelocity", "VelocityEstimate", "EstimatedVelocity" };
+            for (int depth = 0; depth < 4 && current != null; depth++)
+            {
+                for (int i = 0; i < names.Length; i++)
+                {
+                    object value = ReadMember(current, names[i]);
+                    if (value is Vector3)
+                    {
+                        velocity = (Vector3)value;
+                        if (velocity.sqrMagnitude > 0.01f) return true;
+                    }
+                }
+                Rigidbody rigidbody = current as Rigidbody;
+                if (rigidbody != null && rigidbody.velocity.sqrMagnitude > 0.01f)
+                {
+                    velocity = rigidbody.velocity;
+                    return true;
+                }
+                current = ReadMember(current, "Controller") ?? ReadMember(current, "Hand") ?? ReadMember(current, "Interactor");
+            }
+            return false;
+        }
+
+        private static void DrawTrajectory(ArrowTrack track)
+        {
+            if (track == null || track.Arrow == null) return;
+            EnsurePreviewLine(track);
+            if (track.PreviewLine == null) return;
+            ApplyFlightGravity(track.Arrow);
+            Vector3 position = track.Arrow.transform.position;
+            Vector3 velocity = CalculateVelocity(track.Arrow.transform, track.HandVelocity);
+            float duration = Mathf.Clamp(PreviewDuration, 0.25f, 5f);
+            float step = duration / PreviewSegments;
+            track.PreviewLine.positionCount = PreviewSegments + 1;
+            for (int i = 0; i <= PreviewSegments; i++)
+            {
+                float time = i * step;
+                Vector3 point = position + velocity * time + Physics.gravity * (0.5f * GravityScale * time * time);
+                track.PreviewLine.SetPosition(i, point);
+            }
+            track.PreviewLine.enabled = true;
+        }
+
+        private static void EnsurePreviewLine(ArrowTrack track)
+        {
+            if (track.PreviewLine != null) return;
+            if (_previewMaterial == null)
+            {
+                Shader shader = Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Standard");
+                if (shader == null) return;
+                _previewMaterial = new Material(shader);
+                _previewMaterial.hideFlags = HideFlags.HideAndDontSave;
+                if (_previewMaterial.HasProperty("_Color")) _previewMaterial.color = new Color(0.15f, 0.95f, 1f, 0.95f);
+            }
+            track.PreviewObject = new GameObject("TavernFun_ArrowTrajectory");
+            track.PreviewObject.hideFlags = HideFlags.HideAndDontSave;
+            track.PreviewLine = track.PreviewObject.AddComponent<LineRenderer>();
+            track.PreviewLine.useWorldSpace = true;
+            track.PreviewLine.material = _previewMaterial;
+            track.PreviewLine.startWidth = 0.018f;
+            track.PreviewLine.endWidth = 0.006f;
+            track.PreviewLine.startColor = new Color(0.15f, 0.95f, 1f, 0.95f);
+            track.PreviewLine.endColor = new Color(0.15f, 0.95f, 1f, 0.2f);
+            track.PreviewLine.positionCount = PreviewSegments + 1;
+            track.PreviewLine.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            track.PreviewLine.receiveShadows = false;
+        }
+
+        private static void DestroyPreview(ArrowTrack track)
+        {
+            if (track == null || track.PreviewObject == null) return;
+            UnityEngine.Object.Destroy(track.PreviewObject);
+            track.PreviewObject = null;
+            track.PreviewLine = null;
+        }
+
+        private static void ClearAll()
+        {
+            foreach (ArrowTrack track in Tracks.Values) DestroyPreview(track);
+            Tracks.Clear();
+            ThrowableComponents.Clear();
+            StaleTrackIds.Clear();
+            if (_previewMaterial != null)
+            {
+                UnityEngine.Object.Destroy(_previewMaterial);
+                _previewMaterial = null;
+            }
+        }
+
+        private static bool ReadBool(object target, string name)
+        {
+            object value = ReadMember(target, name);
+            return value is bool && (bool)value;
+        }
+
+        private static object ReadMember(object target, string name)
+        {
+            if (target == null) return null;
+            try
+            {
+                PropertyInfo property = AccessTools.Property(target.GetType(), name);
+                if (property != null) return property.GetValue(target, null);
+                FieldInfo field = AccessTools.Field(target.GetType(), name);
+                if (field != null) return field.GetValue(target);
+            }
+            catch { }
+            return null;
+        }
+    }
+
+    [HarmonyPatch]
+    internal static class ThrowableArrowReleasePatch
+    {
+        private static MethodBase TargetMethod()
+        {
+            Type type = AccessTools.TypeByName("ThrowableArrow");
+            if (type == null) return null;
+            MethodInfo[] methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            for (int i = 0; i < methods.Length; i++)
+                if (methods[i].Name == "StartUpdatingArrowFlight" && methods[i].GetParameters().Length == 2) return methods[i];
+            return null;
+        }
+
+        [HarmonyPrefix]
+        private static bool Prefix(object __instance, object[] __args)
+        {
+            if (!ArrowThrowController.Enabled || __instance == null || __args == null || __args.Length < 2) return true;
+            try
+            {
+                object interactable = __args[0];
+                object interacted = ReadMember(interactable, "IsInteractedWith");
+                if (interacted is bool && (bool)interacted) return true;
+                object pickup = ReadMember(__instance, "pickup");
+                object docked = ReadMember(pickup, "IsDocked");
+                if (docked is bool && (bool)docked) return true;
+                Component arrow = ReadMember(__instance, "arrow") as Component;
+                if (arrow == null || !ArrowThrowController.ThrowArrow(arrow, __args[1])) return true;
+                return false;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning("[Arrow Throw] Release hook failed: " + ex.GetBaseException().Message);
+                return true;
+            }
+        }
+
+        private static object ReadMember(object target, string name)
+        {
+            if (target == null) return null;
+            try
+            {
+                PropertyInfo property = AccessTools.Property(target.GetType(), name);
+                if (property != null) return property.GetValue(target, null);
+                FieldInfo field = AccessTools.Field(target.GetType(), name);
                 if (field != null) return field.GetValue(target);
             }
             catch { }
