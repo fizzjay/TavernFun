@@ -192,6 +192,9 @@ namespace TavernFun
         private bool _isDraggingClimbingMenu;
         private Vector2 _dragOffsetClimbingMenu;
         private Rect _lastClimbingMenuRect;
+        // Friendly AI status line on the Player tab. Its visibility is latched on the Layout
+        // event so IMGUI sees the same controls on Repaint even if the toggle flips mid-frame.
+        private bool _friendlyAiShowStatus;
         private const int ClimbingMenuWidth = 240;
         private const int ClimbingMenuHeight = 340;
         private static readonly Color32 OuterFrameColor = new Color32(198, 166, 130, 255);
@@ -287,6 +290,7 @@ namespace TavernFun
             _worldTools.Tick();
             ClimbEverythingPatch.Tick();
             ClimbingStuffController.Tick();
+            FriendlyAiController.Tick();
             ArrowThrowController.Tick();
         }
         public void LateUpdate()
@@ -1608,8 +1612,22 @@ namespace TavernFun
             if (DrawGoldButton(climbingStuffRect, "Climbing Stuff", _climbingMenuOpen, false))
                 _climbingMenuOpen = true;
             GUILayout.FlexibleSpace();
+            Rect friendlyAiRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            bool friendlyAiRightClicked = WasRightClicked(friendlyAiRect); // must run BEFORE DrawGoldButton
+            bool friendlyAiOn = FriendlyAiController.Enabled;
+            if (DrawGoldButton(friendlyAiRect, friendlyAiOn ? "Friendly AI: On" : "Friendly AI: Off", friendlyAiOn, false))
+                FriendlyAiController.SetEnabled(!friendlyAiOn);
+            if (friendlyAiRightClicked)
+                FriendlyAiController.Rescan();
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
+            if (Event.current == null || Event.current.type == EventType.Layout)
+                _friendlyAiShowStatus = !string.IsNullOrEmpty(FriendlyAiController.Status);
+            if (_friendlyAiShowStatus)
+            {
+                GUILayout.Label(FriendlyAiController.Status, _labelStyle);
+                GUILayout.Space(6f);
+            }
             GUILayout.BeginHorizontal();
             Rect devToolsRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
             if (DrawGoldButton(devToolsRect, "Dev Tools", _devToolsMenuOpen, false))
@@ -9340,6 +9358,1018 @@ namespace TavernFun
                 DevToolsDebugOverlay.Record("Impact " + __originalMethod.DeclaringType.Name + "." + __originalMethod.Name + detail);
             }
             catch { }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------
+    // Friendly AI (Player tab toggle, next to Climbing Stuff)
+    //
+    // Makes the game's creatures - every Alta.Intelligence agent: Phantom, Spriggull, Turabada,
+    // Gotera, DeathFern, GreaterGotera and anything else built on Agent<T> - leave the LOCAL
+    // player alone. Creature AI is decided by the server, so this only has an effect while you
+    // are the server (solo or hosting); on someone else's server the status line says so.
+    //
+    // Nothing in here references a game type directly. Agent classes, their deciders and their
+    // target lists are all found by reflection, so a renamed or missing class shows up as a
+    // status message instead of a build error.
+    //
+    // Three layers, all behind the one toggle:
+    //  1. Target veto  - the deciders' AddTarget(ITarget) is patched so the local player is never
+    //                    added as a target (covers sight, hurt-retaliation, ...).
+    //  2. De-aggro     - when switched on (or on right-click = Rescan) every live creature that
+    //                    already tracks you (target lists, Hurt, hurtKeys) forgets you and cancels
+    //                    its current action.
+    //  3. Damage guard - HealthObject.ReceiveDamage on the local player is ignored when the hit
+    //                    traces back to a creature (beaks, contact damage, ...). The creature that
+    //                    landed it is de-aggroed too.
+    // ------------------------------------------------------------------------------------
+    internal static class FriendlyAiController
+    {
+        // ---- tuning -------------------------------------------------------------------
+        private const float TickInterval = 0.5f;          // housekeeping / status cadence (seconds)
+        private const float LocalRefreshInterval = 0.5f;  // how often the local player's transforms are re-read
+        private const float AutoRetryInterval = 8f;       // while no hook exists, rescan this often...
+        private const int MaxAutoRetries = 6;             // ...this many times, then wait for a manual rescan
+        private const int MaxPatches = 128;               // safety cap on Harmony patches
+        private const int PatchesPerFrame = 3;            // hooks are applied a few per frame so switching on never hitches
+        private const int MaxGraphNodes = 64;             // damage attribution: objects inspected per hit
+        private const int MaxGraphDepth = 3;              // damage attribution: reference hops from the damage data
+        private const int MaxPendingAgents = 16;          // creatures waiting to be de-aggroed after landing a hit
+        private const int MaxLoggedBlocks = 6;            // only the first few blocks are written to the log
+        private const int MaxLoggedUnexplained = 3;       // ...and the first few hits that no list explains
+
+        private const BindingFlags AnyInstance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        private const BindingFlags DeclaredInstance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+
+        private sealed class WrapperInfo
+        {
+            internal FieldInfo[] ObjectFields;
+            internal MemberInfo LocalFlag;
+        }
+
+        private static bool _enabled;
+        private static string _status = string.Empty;
+        private static int _mainThreadId = -1;
+        private static float _nextTick;
+        private static float _nextRetry;
+        private static float _nextLocalRefresh;
+        private static int _retryCount;
+
+        private static HarmonyLib.Harmony _harmony;
+        private static readonly HashSet<string> PatchedKeys = new HashSet<string>();
+        private static readonly HashSet<string> FailedKeys = new HashSet<string>();
+        private static readonly HashSet<string> QueuedKeys = new HashSet<string>();
+        private static readonly List<MethodInfo> PatchQueue = new List<MethodInfo>();
+        private static int _hookCount;
+        private static bool _dumpedLayout;
+        private static bool _loggedPatchCap;
+
+        private static readonly List<Transform> LocalRoots = new List<Transform>();
+        private static PlayerController _localController;
+
+        private static int _blockedTargets;
+        private static int _blockedHits;
+        private static int _loggedBlocks;
+        private static int _loggedUnexplained;
+        private static int _loggedTickFailures;
+        private static readonly List<Component> PendingAgents = new List<Component>();
+
+        private static readonly Dictionary<Type, bool> AgentTypeCache = new Dictionary<Type, bool>();
+        private static readonly Dictionary<Type, WrapperInfo> WrapperCache = new Dictionary<Type, WrapperInfo>();
+        private static readonly Dictionary<Type, FieldInfo[]> TargetCollectionCache = new Dictionary<Type, FieldInfo[]>();
+        private static readonly Dictionary<Type, FieldInfo[]> GraphFieldCache = new Dictionary<Type, FieldInfo[]>();
+        private static readonly Dictionary<Type, MethodInfo> CancelCache = new Dictionary<Type, MethodInfo>();
+
+        private static bool _serverLookupDone;
+        private static MemberInfo _isServerMember;
+
+        // ---- public surface ------------------------------------------------------------
+        internal static bool Enabled { get { return _enabled; } }
+
+        // Two short lines for the Player tab; empty while the toggle is off.
+        internal static string Status { get { return _status; } }
+
+        internal static void SetEnabled(bool enabled)
+        {
+            RememberMainThread();
+            if (enabled == _enabled) return;
+            _enabled = enabled;
+            if (!enabled)
+            {
+                _status = string.Empty;
+                PendingAgents.Clear();
+                PatchQueue.Clear();
+                QueuedKeys.Clear();
+                Log("Off - creatures behave normally again.");
+                return;
+            }
+            _retryCount = 0;
+            _nextRetry = Time.unscaledTime + AutoRetryInterval;
+            _blockedTargets = 0;
+            _blockedHits = 0;
+            _loggedBlocks = 0;
+            _loggedUnexplained = 0;
+            _loggedTickFailures = 0;
+            RunScan("On");
+        }
+
+        // Right-click on the button: look for hooks again and make every live creature forget you.
+        internal static void Rescan()
+        {
+            RememberMainThread();
+            if (!_enabled) return;
+            RunScan("Rescan");
+        }
+
+        internal static void Tick()
+        {
+            RememberMainThread();
+            if (!_enabled) return;
+            ServicePatchQueue();
+            float now = Time.unscaledTime;
+            if (now < _nextTick) return;
+            _nextTick = now + TickInterval;
+            try
+            {
+                RefreshLocalPlayer();
+                ServicePendingAgents();
+                if (_hookCount == 0 && PatchQueue.Count == 0 && _retryCount < MaxAutoRetries && now >= _nextRetry)
+                {
+                    _retryCount++;
+                    _nextRetry = now + AutoRetryInterval;
+                    RunScan("Retry " + _retryCount);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (_loggedTickFailures++ < 3) Log("Tick failed: " + ex.GetBaseException().Message);
+            }
+            _status = BuildStatus();
+        }
+
+        // Called by the HealthObject.ReceiveDamage patch. True = swallow this damage.
+        internal static bool ShouldBlockDamage(object victim, object impact)
+        {
+            if (!_enabled || impact == null) return false;
+            try
+            {
+                if (System.Threading.Thread.CurrentThread.ManagedThreadId != _mainThreadId) return false;
+                UnityEngine.Object victimObject = victim as UnityEngine.Object;
+                if (victimObject == null) return false;
+                EnsureLocalPlayer();
+                if (!IsLocalUnityObject(victimObject)) return false;
+                Component agent;
+                if (!AttackerIsAgent(impact, out agent)) return false;
+                _blockedHits++;
+                QueueAgent(agent);
+                LogBlock("hit from", agent);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // ---- scanning / hooking ----------------------------------------------------------
+        private static void RememberMainThread()
+        {
+            _mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
+        }
+
+        private static void RunScan(string reason)
+        {
+            try
+            {
+                RefreshLocalPlayer();
+                List<MonoBehaviour> agents = FindLiveAgents();
+                DiscoverAndHook(agents);
+                int cleared = 0;
+                for (int i = 0; i < agents.Count; i++) cleared += PurgeAgent(agents[i]);
+                Log(reason + ": " + (_hookCount + PatchQueue.Count) + " AI hooks, " + agents.Count + " live creatures, " + cleared + " lock-ons cleared.");
+            }
+            catch (Exception ex)
+            {
+                Log("Scan failed: " + ex.GetBaseException().Message);
+            }
+            _status = BuildStatus();
+        }
+
+        private static List<MonoBehaviour> FindLiveAgents()
+        {
+            List<MonoBehaviour> agents = new List<MonoBehaviour>();
+            MonoBehaviour[] all = Object.FindObjectsOfType<MonoBehaviour>();
+            for (int i = 0; i < all.Length; i++)
+            {
+                MonoBehaviour behaviour = all[i];
+                if (behaviour == null || !IsAgentType(behaviour.GetType())) continue;
+                agents.Add(behaviour);
+            }
+            return agents;
+        }
+
+        private static void DiscoverAndHook(List<MonoBehaviour> liveAgents)
+        {
+            List<Type> agentTypes = FindAgentTypes();
+            HashSet<Type> deciderTypes = new HashSet<Type>();
+            for (int i = 0; i < agentTypes.Count; i++)
+            {
+                Type declared = GetMemberType(agentTypes[i], "GeneralActionDecider");
+                if (declared != null) deciderTypes.Add(declared);
+            }
+            // A live creature can carry a more specific decider class than the declared one.
+            for (int i = 0; i < liveAgents.Count; i++)
+            {
+                object decider = ReadMember(liveAgents[i], "GeneralActionDecider");
+                if (decider != null) deciderTypes.Add(decider.GetType());
+            }
+            foreach (Type deciderType in deciderTypes) QueueAddTarget(deciderType);
+
+            if (!_dumpedLayout && agentTypes.Count > 0)
+            {
+                _dumpedLayout = true;
+                DumpLayout("creature " + agentTypes[0].Name, agentTypes[0]);
+                foreach (Type deciderType in deciderTypes)
+                {
+                    DumpLayout("decider " + deciderType.Name, deciderType);
+                    break;
+                }
+            }
+            if (agentTypes.Count == 0) Log("No creature classes (Agent<T>) were found in this game build.");
+            else if (deciderTypes.Count == 0) Log("Found " + agentTypes.Count + " creature classes but none exposes GeneralActionDecider.");
+        }
+
+        // Finds every AddTarget on a decider class and queues it; ServicePatchQueue applies them.
+        private static void QueueAddTarget(Type deciderType)
+        {
+            if (deciderType == null || deciderType.IsInterface || deciderType.ContainsGenericParameters) return;
+            MethodInfo[] methods;
+            try { methods = deciderType.GetMethods(AnyInstance); }
+            catch { return; }
+            for (int i = 0; i < methods.Length; i++)
+            {
+                MethodInfo method = methods[i];
+                if (method.Name != "AddTarget" || method.IsAbstract || method.IsGenericMethodDefinition || method.ContainsGenericParameters) continue;
+                if (method.GetParameters().Length == 0) continue;
+                Type owner = method.DeclaringType;
+                if (owner == null || owner.ContainsGenericParameters) continue;
+                string key = PatchKey(method);
+                if (PatchedKeys.Contains(key) || FailedKeys.Contains(key) || QueuedKeys.Contains(key)) continue;
+                if (PatchedKeys.Count + QueuedKeys.Count >= MaxPatches)
+                {
+                    if (!_loggedPatchCap)
+                    {
+                        _loggedPatchCap = true;
+                        Log("Hook cap (" + MaxPatches + ") reached - the remaining creature classes are not hooked.");
+                    }
+                    return;
+                }
+                QueuedKeys.Add(key);
+                PatchQueue.Add(method);
+            }
+        }
+
+        private static string PatchKey(MethodInfo method)
+        {
+            return method.DeclaringType.AssemblyQualifiedName + "#" + method.MetadataToken;
+        }
+
+        // A few Harmony patches per frame: a Harmony patch is not free and there is one per creature class.
+        private static void ServicePatchQueue()
+        {
+            if (PatchQueue.Count == 0) return;
+            try
+            {
+                MethodInfo prefix = typeof(FriendlyAiController).GetMethod("AddTargetPrefix", BindingFlags.Static | BindingFlags.NonPublic);
+                for (int n = 0; n < PatchesPerFrame && PatchQueue.Count > 0; n++)
+                {
+                    MethodInfo method = PatchQueue[0];
+                    PatchQueue.RemoveAt(0);
+                    string key = PatchKey(method);
+                    QueuedKeys.Remove(key);
+                    if (prefix == null) continue;
+                    try
+                    {
+                        if (_harmony == null) _harmony = new HarmonyLib.Harmony("TavernFun.FriendlyAi");
+                        _harmony.Patch(method, prefix: new HarmonyMethod(prefix));
+                        PatchedKeys.Add(key);
+                        _hookCount++;
+                        if (_hookCount <= 6) Log("Hooked " + method.DeclaringType + ".AddTarget");
+                    }
+                    catch (Exception ex)
+                    {
+                        FailedKeys.Add(key);
+                        Log("Could not hook " + method.DeclaringType + ".AddTarget: " + ex.GetBaseException().Message);
+                    }
+                }
+                if (PatchQueue.Count == 0) Log("Hooks ready: " + _hookCount + " applied, " + FailedKeys.Count + " failed.");
+            }
+            catch (Exception ex)
+            {
+                PatchQueue.Clear();
+                QueuedKeys.Clear();
+                Log("Hooking failed: " + ex.GetBaseException().Message);
+            }
+            _status = BuildStatus();
+        }
+
+        // Harmony prefix for every AddTarget: false = do not add (the target is the local player).
+        private static bool AddTargetPrefix(object[] __args)
+        {
+            if (!_enabled) return true;
+            try
+            {
+                if (__args == null || __args.Length == 0) return true;
+                if (System.Threading.Thread.CurrentThread.ManagedThreadId != _mainThreadId) return true;
+                for (int i = 0; i < __args.Length; i++)
+                {
+                    if (!IsLocalPlayerObject(__args[i])) continue;
+                    _blockedTargets++;
+                    LogBlock("lock-on on", __args[i]);
+                    return false;
+                }
+            }
+            catch
+            {
+                // never let a failed check interfere with the game's own AI
+            }
+            return true;
+        }
+
+        // ---- who is "me"? --------------------------------------------------------------
+        private static void EnsureLocalPlayer()
+        {
+            if (Time.unscaledTime >= _nextLocalRefresh) RefreshLocalPlayer();
+        }
+
+        private static void RefreshLocalPlayer()
+        {
+            _nextLocalRefresh = Time.unscaledTime + LocalRefreshInterval;
+            LocalRoots.Clear();
+            _localController = null;
+            try
+            {
+                PlayerController controller = PlayerController.Current;
+                if (controller == null) return;
+                _localController = controller;
+                AddLocalRoot(controller.transform);
+                Camera camera = controller.Camera;
+                if (camera != null) AddLocalRoot(camera.transform);
+            }
+            catch
+            {
+                // no usable local player right now (loading / scene change): nothing is protected until there is one
+            }
+        }
+
+        private static void AddLocalRoot(Transform transform)
+        {
+            if (transform == null) return;
+            Transform root = transform.root;
+            if (root != null && !LocalRoots.Contains(root)) LocalRoots.Add(root);
+        }
+
+        // True when this object (an ITarget or anything that wraps one) is the local player.
+        private static bool IsLocalPlayerObject(object target)
+        {
+            if (target == null) return false;
+            Type type = target.GetType();
+            if (IsAgentType(type)) return false;
+            EnsureLocalPlayer();
+            if (LocalRoots.Count == 0 && _localController == null) return false;
+            UnityEngine.Object unityObject = target as UnityEngine.Object;
+            if (unityObject != null) return IsLocalUnityObject(unityObject);
+            if (target is UnityEngine.Object) return false; // destroyed
+            return IsLocalWrapper(target, type);
+        }
+
+        private static bool IsLocalUnityObject(UnityEngine.Object obj)
+        {
+            Transform transform = TransformOf(obj);
+            if (transform == null) return false;
+            bool local = false;
+            Transform root = transform.root;
+            for (int i = 0; i < LocalRoots.Count && !local; i++)
+            {
+                if (LocalRoots[i] != null && LocalRoots[i] == root) local = true;
+            }
+            if (!local && _localController != null)
+            {
+                PlayerController owner = transform.GetComponentInParent<PlayerController>();
+                if (owner != null && owner == _localController) local = true;
+            }
+            // A creature that happens to share the player's hierarchy is still a creature.
+            if (local && FindOwningAgent(obj) != null) return false;
+            return local;
+        }
+
+        private static Transform TransformOf(UnityEngine.Object obj)
+        {
+            Component component = obj as Component;
+            if (component != null) return component.transform;
+            GameObject gameObject = obj as GameObject;
+            return gameObject != null ? gameObject.transform : null;
+        }
+
+        // Targets are not always components: some wrap one. Look one level in, and honour an
+        // IsLocalPlayer / IsLocal flag if the wrapper has one.
+        private static bool IsLocalWrapper(object target, Type type)
+        {
+            WrapperInfo info;
+            if (!WrapperCache.TryGetValue(type, out info))
+            {
+                info = BuildWrapperInfo(type);
+                WrapperCache[type] = info;
+            }
+            if (info.LocalFlag != null && ReadBool(info.LocalFlag, target)) return true;
+            for (int i = 0; i < info.ObjectFields.Length; i++)
+            {
+                object value = null;
+                try { value = info.ObjectFields[i].GetValue(target); }
+                catch { }
+                UnityEngine.Object unityObject = value as UnityEngine.Object;
+                if (unityObject != null && IsLocalUnityObject(unityObject)) return true;
+            }
+            return false;
+        }
+
+        private static WrapperInfo BuildWrapperInfo(Type type)
+        {
+            WrapperInfo info = new WrapperInfo();
+            List<FieldInfo> fields = new List<FieldInfo>();
+            try
+            {
+                for (Type t = type; t != null && t != typeof(object); t = t.BaseType)
+                {
+                    FieldInfo[] declared = t.GetFields(DeclaredInstance);
+                    for (int i = 0; i < declared.Length; i++)
+                    {
+                        if (typeof(UnityEngine.Object).IsAssignableFrom(declared[i].FieldType)) fields.Add(declared[i]);
+                    }
+                }
+                string[] flagNames = new string[] { "IsLocalPlayer", "IsLocal" };
+                for (int i = 0; i < flagNames.Length && info.LocalFlag == null; i++)
+                {
+                    PropertyInfo property = type.GetProperty(flagNames[i], AnyInstance);
+                    if (property != null && property.PropertyType == typeof(bool) && property.GetIndexParameters().Length == 0) info.LocalFlag = property;
+                    else
+                    {
+                        FieldInfo field = type.GetField(flagNames[i], AnyInstance);
+                        if (field != null && field.FieldType == typeof(bool)) info.LocalFlag = field;
+                    }
+                }
+            }
+            catch { }
+            info.ObjectFields = fields.ToArray();
+            return info;
+        }
+
+        private static bool ReadBool(MemberInfo member, object target)
+        {
+            try
+            {
+                object value = null;
+                PropertyInfo property = member as PropertyInfo;
+                if (property != null) value = property.GetValue(target, null);
+                else
+                {
+                    FieldInfo field = member as FieldInfo;
+                    if (field != null) value = field.GetValue(target);
+                }
+                return value is bool && (bool)value;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // ---- creatures -----------------------------------------------------------------
+        private static bool IsAgentType(Type type)
+        {
+            bool cached;
+            if (AgentTypeCache.TryGetValue(type, out cached)) return cached;
+            cached = DerivesFromAgent(type);
+            AgentTypeCache[type] = cached;
+            return cached;
+        }
+
+        // Agent<T> in Alta.Intelligence: the generic base every creature class derives from.
+        private static bool DerivesFromAgent(Type type)
+        {
+            for (Type t = type; t != null && t != typeof(object); t = t.BaseType)
+            {
+                if (t.IsGenericType && t.GetGenericTypeDefinition().Name == "Agent`1") return true;
+            }
+            return false;
+        }
+
+        private static List<Type> FindAgentTypes()
+        {
+            List<Type> result = new List<Type>();
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                Assembly assembly = assemblies[i];
+                if (assembly == null || IsIgnoredAssembly(assembly)) continue;
+                Type[] types;
+                try { types = assembly.GetTypes(); }
+                catch (ReflectionTypeLoadException ex) { types = ex.Types; }
+                catch { continue; }
+                if (types == null) continue;
+                for (int j = 0; j < types.Length; j++)
+                {
+                    Type type = types[j];
+                    if (type == null || !type.IsClass || type.IsAbstract || type.ContainsGenericParameters) continue;
+                    if (DerivesFromAgent(type)) result.Add(type);
+                }
+            }
+            return result;
+        }
+
+        private static bool IsIgnoredAssembly(Assembly assembly)
+        {
+            try
+            {
+                if (assembly.IsDynamic) return true;
+                string name = assembly.GetName().Name;
+                string[] skip = new string[] { "System", "mscorlib", "Mono.", "UnityEngine", "Unity.", "netstandard", "Microsoft", "Newtonsoft", "MelonLoader", "0Harmony", "HarmonyLib", "MonoMod", "Il2Cpp", "TavernFun" };
+                for (int i = 0; i < skip.Length; i++)
+                {
+                    if (name.StartsWith(skip[i], StringComparison.Ordinal)) return true;
+                }
+            }
+            catch
+            {
+                return true;
+            }
+            return false;
+        }
+
+        // The creature (itself or any parent) that owns this object, or null.
+        private static Component FindOwningAgent(UnityEngine.Object obj)
+        {
+            Transform transform = TransformOf(obj);
+            for (int depth = 0; transform != null && depth < 24; depth++, transform = transform.parent)
+            {
+                Component[] components = transform.GetComponents<Component>();
+                for (int i = 0; i < components.Length; i++)
+                {
+                    if (components[i] != null && IsAgentType(components[i].GetType())) return components[i];
+                }
+            }
+            return null;
+        }
+
+        private static void QueueAgent(Component agent)
+        {
+            if (agent == null || PendingAgents.Count >= MaxPendingAgents || PendingAgents.Contains(agent)) return;
+            PendingAgents.Add(agent);
+        }
+
+        // Creatures that just landed a blocked hit: make them forget you so they stop trying.
+        private static void ServicePendingAgents()
+        {
+            if (PendingAgents.Count == 0) return;
+            Component[] batch = PendingAgents.ToArray();
+            PendingAgents.Clear();
+            for (int i = 0; i < batch.Length; i++)
+            {
+                if (batch[i] == null) continue;
+                int removed = PurgeAgent(batch[i]);
+                if (removed == 0 && _loggedUnexplained < MaxLoggedUnexplained)
+                {
+                    _loggedUnexplained++;
+                    Log(batch[i].GetType().Name + " hit you but keeps no list I can clear - it attacks without a target lock (damage is still blocked).");
+                    DumpLayout("attacker " + batch[i].GetType().Name, batch[i].GetType());
+                }
+            }
+        }
+
+        // ---- de-aggro ------------------------------------------------------------------
+        // Removes the local player from everything the creature and its deciders remember.
+        private static int PurgeAgent(object agent)
+        {
+            if (agent == null) return 0;
+            int removed = PurgeTargetCollections(agent);
+            object general = ReadMember(agent, "GeneralActionDecider");
+            if (general != null) removed += PurgeTargetCollections(general);
+            object passive = ReadMember(agent, "ActionDecider");
+            if (passive != null && !object.ReferenceEquals(passive, general)) removed += PurgeTargetCollections(passive);
+            if (removed > 0) TryCancelCurrentAction(agent);
+            return removed;
+        }
+
+        private static int PurgeTargetCollections(object owner)
+        {
+            int removed = 0;
+            FieldInfo[] fields = GetTargetCollectionFields(owner.GetType());
+            for (int i = 0; i < fields.Length; i++)
+            {
+                object collection = null;
+                try { collection = fields[i].GetValue(owner); }
+                catch { }
+                if (collection != null) removed += PurgeCollection(collection);
+            }
+            return removed;
+        }
+
+        // Only generic collections whose element/key type is an ITarget (List<ITarget>,
+        // HashSet<ITarget>, Dictionary<ITarget, float>, ...). Hurt + hurtKeys both qualify, so the
+        // pair stays in step.
+        private static FieldInfo[] GetTargetCollectionFields(Type type)
+        {
+            FieldInfo[] cached;
+            if (TargetCollectionCache.TryGetValue(type, out cached)) return cached;
+            List<FieldInfo> found = new List<FieldInfo>();
+            try
+            {
+                for (Type t = type; t != null && t != typeof(object); t = t.BaseType)
+                {
+                    FieldInfo[] fields = t.GetFields(DeclaredInstance);
+                    for (int i = 0; i < fields.Length; i++)
+                    {
+                        Type fieldType = fields[i].FieldType;
+                        if (fieldType.IsGenericType && typeof(IEnumerable).IsAssignableFrom(fieldType) && HasTargetArgument(fieldType)) found.Add(fields[i]);
+                    }
+                }
+            }
+            catch { }
+            cached = found.ToArray();
+            TargetCollectionCache[type] = cached;
+            return cached;
+        }
+
+        private static bool HasTargetArgument(Type genericType)
+        {
+            Type[] arguments = genericType.GetGenericArguments();
+            for (int i = 0; i < arguments.Length; i++)
+            {
+                if (IsTargetLikeType(arguments[i])) return true;
+            }
+            return false;
+        }
+
+        private static bool IsTargetLikeType(Type type)
+        {
+            if (type == null) return false;
+            if (type.Name == "ITarget") return true;
+            Type[] interfaces = type.GetInterfaces();
+            for (int i = 0; i < interfaces.Length; i++)
+            {
+                if (interfaces[i].Name == "ITarget") return true;
+            }
+            return false;
+        }
+
+        private static int PurgeCollection(object collection)
+        {
+            int removed = 0;
+            try
+            {
+                IDictionary dictionary = collection as IDictionary;
+                if (dictionary != null)
+                {
+                    List<object> doomed = new List<object>();
+                    foreach (DictionaryEntry entry in dictionary)
+                    {
+                        if (IsLocalPlayerObject(entry.Key)) doomed.Add(entry.Key);
+                    }
+                    for (int i = 0; i < doomed.Count; i++)
+                    {
+                        dictionary.Remove(doomed[i]);
+                        removed++;
+                    }
+                    return removed;
+                }
+                IList list = collection as IList;
+                if (list != null)
+                {
+                    if (list.IsFixedSize || list.IsReadOnly) return 0;
+                    for (int i = list.Count - 1; i >= 0; i--)
+                    {
+                        if (!IsLocalPlayerObject(list[i])) continue;
+                        list.RemoveAt(i);
+                        removed++;
+                    }
+                    return removed;
+                }
+                // HashSet<T> and friends: no non-generic Remove, so call the typed one.
+                IEnumerable sequence = collection as IEnumerable;
+                Type[] arguments = collection.GetType().GetGenericArguments();
+                if (sequence == null || arguments.Length != 1) return 0;
+                MethodInfo remove = collection.GetType().GetMethod("Remove", new Type[] { arguments[0] });
+                if (remove == null) return 0;
+                List<object> matches = new List<object>();
+                foreach (object item in sequence)
+                {
+                    if (IsLocalPlayerObject(item)) matches.Add(item);
+                }
+                for (int i = 0; i < matches.Count; i++)
+                {
+                    remove.Invoke(collection, new object[] { matches[i] });
+                    removed++;
+                }
+            }
+            catch
+            {
+                // a collection we cannot edit is simply left alone
+            }
+            return removed;
+        }
+
+        private static void TryCancelCurrentAction(object agent)
+        {
+            try
+            {
+                Type type = agent.GetType();
+                MethodInfo method;
+                if (!CancelCache.TryGetValue(type, out method))
+                {
+                    method = FindMethod(type, "CancelCurrentAction");
+                    CancelCache[type] = method;
+                }
+                if (method != null) method.Invoke(agent, null);
+            }
+            catch
+            {
+            }
+        }
+
+        // ---- damage attribution ----------------------------------------------------------
+        // Walks the damage data's references (a few hops, game types only) looking for a creature.
+        private static bool AttackerIsAgent(object root, out Component agent)
+        {
+            agent = null;
+            List<object> nodes = new List<object>();
+            List<int> depths = new List<int>();
+            nodes.Add(root);
+            depths.Add(0);
+            for (int head = 0; head < nodes.Count; head++)
+            {
+                object node = nodes[head];
+                UnityEngine.Object unityObject = node as UnityEngine.Object;
+                if (unityObject != null)
+                {
+                    agent = FindOwningAgent(unityObject);
+                    if (agent != null) return true;
+                    continue;
+                }
+                if (node is UnityEngine.Object || depths[head] >= MaxGraphDepth) continue;
+                Type type = node.GetType();
+                if (type.IsPrimitive || type.IsEnum || type.IsPointer || type == typeof(string) || !IsGameType(type)) continue;
+                FieldInfo[] fields = GetGraphFields(type);
+                for (int i = 0; i < fields.Length && nodes.Count < MaxGraphNodes; i++)
+                {
+                    object value = null;
+                    try { value = fields[i].GetValue(node); }
+                    catch { }
+                    if (value == null || ContainsReference(nodes, value)) continue;
+                    nodes.Add(value);
+                    depths.Add(depths[head] + 1);
+                }
+            }
+            return false;
+        }
+
+        private static bool ContainsReference(List<object> nodes, object value)
+        {
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                if (object.ReferenceEquals(nodes[i], value)) return true;
+            }
+            return false;
+        }
+
+        // Anything that is not BCL / Unity / a mod loader: the game's own classes.
+        private static bool IsGameType(Type type)
+        {
+            string space = type.Namespace;
+            if (string.IsNullOrEmpty(space)) return true;
+            string[] skip = new string[] { "System", "UnityEngine", "Unity", "TMPro", "Mono", "MelonLoader", "HarmonyLib", "Microsoft", "Newtonsoft", "TavernFun" };
+            for (int i = 0; i < skip.Length; i++)
+            {
+                if (space.StartsWith(skip[i], StringComparison.Ordinal)) return false;
+            }
+            return true;
+        }
+
+        private static FieldInfo[] GetGraphFields(Type type)
+        {
+            FieldInfo[] cached;
+            if (GraphFieldCache.TryGetValue(type, out cached)) return cached;
+            List<FieldInfo> found = new List<FieldInfo>();
+            try
+            {
+                for (Type t = type; t != null && t != typeof(object); t = t.BaseType)
+                {
+                    FieldInfo[] fields = t.GetFields(DeclaredInstance);
+                    for (int i = 0; i < fields.Length; i++)
+                    {
+                        Type fieldType = fields[i].FieldType;
+                        if (fieldType.IsPrimitive || fieldType.IsEnum || fieldType.IsPointer || fieldType == typeof(string)) continue;
+                        if (typeof(Delegate).IsAssignableFrom(fieldType)) continue;
+                        if (fieldType == typeof(object) || typeof(UnityEngine.Object).IsAssignableFrom(fieldType) || (!fieldType.IsValueType && IsGameType(fieldType))) found.Add(fields[i]);
+                    }
+                }
+            }
+            catch { }
+            cached = found.ToArray();
+            GraphFieldCache[type] = cached;
+            return cached;
+        }
+
+        // ---- reflection helpers ----------------------------------------------------------
+        private static Type GetMemberType(Type type, string name)
+        {
+            try
+            {
+                for (Type t = type; t != null && t != typeof(object); t = t.BaseType)
+                {
+                    PropertyInfo property = t.GetProperty(name, DeclaredInstance);
+                    if (property != null && property.GetIndexParameters().Length == 0) return property.PropertyType;
+                    FieldInfo field = t.GetField(name, DeclaredInstance);
+                    if (field != null) return field.FieldType;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static object ReadMember(object target, string name)
+        {
+            if (target == null) return null;
+            try
+            {
+                for (Type t = target.GetType(); t != null && t != typeof(object); t = t.BaseType)
+                {
+                    PropertyInfo property = t.GetProperty(name, DeclaredInstance);
+                    if (property != null && property.CanRead && property.GetIndexParameters().Length == 0) return property.GetValue(target, null);
+                    FieldInfo field = t.GetField(name, DeclaredInstance);
+                    if (field != null) return field.GetValue(target);
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static MethodInfo FindMethod(Type type, string name)
+        {
+            try
+            {
+                for (Type t = type; t != null && t != typeof(object); t = t.BaseType)
+                {
+                    MethodInfo[] methods = t.GetMethods(DeclaredInstance);
+                    for (int i = 0; i < methods.Length; i++)
+                    {
+                        if (methods[i].Name == name && methods[i].GetParameters().Length == 0 && !methods[i].IsAbstract) return methods[i];
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static Type FindTypeByName(string fullName, string shortName)
+        {
+            Type type = AccessTools.TypeByName(fullName);
+            if (type != null) return type;
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                if (assemblies[i] == null || IsIgnoredAssembly(assemblies[i])) continue;
+                Type[] types;
+                try { types = assemblies[i].GetTypes(); }
+                catch (ReflectionTypeLoadException ex) { types = ex.Types; }
+                catch { continue; }
+                if (types == null) continue;
+                for (int j = 0; j < types.Length; j++)
+                {
+                    if (types[j] != null && types[j].Name == shortName) return types[j];
+                }
+            }
+            return null;
+        }
+
+        // NetworkSceneManager.IsServer: creature AI only runs where this is true.
+        private static bool? ReadIsServer()
+        {
+            try
+            {
+                if (!_serverLookupDone)
+                {
+                    _serverLookupDone = true;
+                    Type type = FindTypeByName("Alta.Networking.NetworkSceneManager", "NetworkSceneManager");
+                    if (type != null)
+                    {
+                        const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
+                        _isServerMember = type.GetProperty("IsServer", flags);
+                        if (_isServerMember == null) _isServerMember = type.GetField("IsServer", flags);
+                    }
+                }
+                object value = null;
+                PropertyInfo property = _isServerMember as PropertyInfo;
+                if (property != null) value = property.GetValue(null, null);
+                else
+                {
+                    FieldInfo field = _isServerMember as FieldInfo;
+                    if (field != null) value = field.GetValue(null);
+                }
+                if (value is bool) return (bool)value;
+            }
+            catch { }
+            return null;
+        }
+
+        // ---- status / logging ------------------------------------------------------------
+        private static string BuildStatus()
+        {
+            if (!_enabled) return string.Empty;
+            if (PatchQueue.Count > 0) return "Hooking creature AI...\n" + PatchQueue.Count + " left";
+            if (_hookCount == 0) return "No AI target hook found yet\nRight-click the button to rescan";
+            bool? server = ReadIsServer();
+            if (server.HasValue && !server.Value) return "Not the server: its creatures\nignore this (host to use it)";
+            return "Creatures ignore you (" + _hookCount + " hooks)\nBlocked " + Compact(_blockedTargets) + " lock-ons, " + Compact(_blockedHits) + " hits";
+        }
+
+        private static string Compact(int value)
+        {
+            return value > 9999 ? "9999+" : value.ToString();
+        }
+
+        private static void Log(string message)
+        {
+            try { MelonLogger.Msg("[Friendly AI] " + message); }
+            catch { }
+        }
+
+        private static void LogBlock(string kind, object subject)
+        {
+            if (_loggedBlocks >= MaxLoggedBlocks) return;
+            _loggedBlocks++;
+            try { Log("Blocked " + kind + " " + Describe(subject)); }
+            catch { }
+        }
+
+        private static string Describe(object value)
+        {
+            if (value == null) return "null";
+            string text = value.GetType().FullName;
+            Component component = value as Component;
+            if (component != null) text += " '" + component.gameObject.name + "'";
+            return text;
+        }
+
+        // One-time dump of the members that matter, so a game update (or a wrong guess above)
+        // can be fixed from the log alone.
+        private static void DumpLayout(string label, Type type)
+        {
+            try
+            {
+                string[] keywords = new string[] { "target", "decider", "hurt", "aggro", "threat", "cancel", "viewcone" };
+                List<string> lines = new List<string>();
+                for (Type t = type; t != null && t != typeof(object) && lines.Count < 40; t = t.BaseType)
+                {
+                    MemberInfo[] members = t.GetMembers(DeclaredInstance);
+                    for (int i = 0; i < members.Length && lines.Count < 40; i++)
+                    {
+                        MemberInfo member = members[i];
+                        if (member.MemberType == MemberTypes.Constructor) continue;
+                        string lower = member.Name.ToLowerInvariant();
+                        bool match = false;
+                        for (int k = 0; k < keywords.Length && !match; k++) match = lower.Contains(keywords[k]);
+                        if (match) lines.Add("  " + t.Name + "." + member.Name + " : " + DescribeMember(member));
+                    }
+                }
+                Log("Layout of " + label + " (" + lines.Count + " relevant members):");
+                for (int i = 0; i < lines.Count; i++) Log(lines[i]);
+            }
+            catch
+            {
+            }
+        }
+
+        private static string DescribeMember(MemberInfo member)
+        {
+            FieldInfo field = member as FieldInfo;
+            if (field != null) return "field " + field.FieldType;
+            PropertyInfo property = member as PropertyInfo;
+            if (property != null) return "property " + property.PropertyType;
+            MethodInfo method = member as MethodInfo;
+            if (method != null) return "method(" + method.GetParameters().Length + ") -> " + method.ReturnType;
+            return member.MemberType.ToString();
+        }
+    }
+
+    // Swallows damage that the local player would take from a creature while Friendly AI is on.
+    // Same target method as VoidDamagePatch; the real decision lives in FriendlyAiController.
+    [HarmonyPatch(typeof(HealthObject), "ReceiveDamage", typeof(float), typeof(float), typeof(DamageData))]
+    internal static class FriendlyAiDamagePatch
+    {
+        private static bool Prefix(HealthObject __instance, DamageData impact)
+        {
+            return !FriendlyAiController.ShouldBlockDamage(__instance, impact);
         }
     }
 
