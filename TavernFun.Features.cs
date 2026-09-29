@@ -193,7 +193,7 @@ namespace TavernFun
         private Vector2 _dragOffsetClimbingMenu;
         private Rect _lastClimbingMenuRect;
         private const int ClimbingMenuWidth = 240;
-        private const int ClimbingMenuHeight = 224;
+        private const int ClimbingMenuHeight = 340;
         private static readonly Color32 OuterFrameColor = new Color32(198, 166, 130, 255);
         private static readonly Color32 OuterFrameShadow = new Color32(140, 112, 82, 255);
         private static readonly Color32 InnerBackgroundColor = new Color32(36, 24, 16, 255);
@@ -2005,14 +2005,27 @@ namespace TavernFun
                 GUILayout.Space(4f);
 
                 Rect moveGrabRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.ExpandWidth(true));
+                bool moveGrabRightClicked = WasRightClicked(moveGrabRect); // must run BEFORE DrawGoldButton
                 if (DrawGoldButton(moveGrabRect, ClimbingStuffController.MoveGrabEnabled ? "Move Grab: On" : "Move Grab: Off", ClimbingStuffController.MoveGrabEnabled, false))
                 {
                     ClimbingStuffController.SetMoveGrabEnabled(!ClimbingStuffController.MoveGrabEnabled);
                 }
+                if (moveGrabRightClicked)
+                {
+                    ClimbingStuffController.ResetTuning();
+                }
                 GUILayout.Space(6f);
 
                 GUILayout.Label("Move Grab: W/S/A/D reach + pull", _labelStyle);
-                GUILayout.Label("Space pulls up, Ctrl pulls down", _labelStyle);
+                GUILayout.Label("Space hauls up, Ctrl reaches down", _labelStyle);
+                GUILayout.Space(4f);
+
+                GUILayout.Label("Pull strength: " + ClimbingStuffController.PullStrength.ToString("0.00"), _labelStyle);
+                ClimbingStuffController.PullStrength = GUILayout.HorizontalSlider(ClimbingStuffController.PullStrength, 0.5f, 1.6f);
+                GUILayout.Label("Up assist: " + ClimbingStuffController.UpAssist.ToString("0.00"), _labelStyle);
+                ClimbingStuffController.UpAssist = GUILayout.HorizontalSlider(ClimbingStuffController.UpAssist, 0f, 1f);
+                GUILayout.Label("Up assist keeps you off the floor", _labelStyle);
+                GUILayout.Label("Right-click Move Grab to reset", _labelStyle);
             }
             else
             {
@@ -8182,7 +8195,12 @@ namespace TavernFun
     //  - Move Grab: keyboard reach-and-pull climbing. Pressing W makes one hand reach in
     //    front and pull, then the next hand repeats (alternating). S does the opposite
     //    (reaches behind and pulls backwards), A/D reach out to the side and pull, Space
-    //    reaches up and pulls, Ctrl pulls straight down. Both extras only run while
+    //    reaches up and pulls, Ctrl reaches down. The down reach is capped and the down
+    //    pull is deliberately weak, every pull leans a little upward, and while the player
+    //    is down at floor level the holds are aimed higher, a floor guard stops the climb
+    //    from dragging them any lower and the pulls turn into a gentle hoist instead. The
+    //    hands spring into a reach, the body eases into each pull and sways with it, so
+    //    the cycle reads as climbing rather than as a machine. Both extras only run while
     //    Climb Everywhere (Grab Anywhere) is enabled.
     internal static class ClimbingStuffController
     {
@@ -8192,17 +8210,46 @@ namespace TavernFun
 
         // --- Move Grab cycle tuning ---
         internal static bool MoveGrabEnabled;
-        private const float MoveGrabHalfCycle = 0.45f;     // seconds per hand
-        private const float MoveGrabReachFraction = 0.32f; // first part of a half-cycle reaches out
-        private const float MoveGrabReachDistance = 1.05f; // how far the hand extends
-        private const float MoveGrabPullDistance = 0.95f;  // how far one pull drags the body
+        // Tuning lives in fields so the Climbing Stuff menu can expose them as sliders.
+        internal static float PullStrength = 1f; // how far one pull carries the body
+        internal static float UpAssist = 0.55f;  // upward lean + how hard a low pull hoists
+
+        private const float MoveGrabHalfCycle = 0.5f;      // seconds per hand at the normal pace
+        private const float MoveGrabReachFraction = 0.3f;  // first part of a half-cycle reaches out
+        private const float MoveGrabHoldFraction = 0.14f;  // last part of a half-cycle holds (both hands set)
+        private const float MoveGrabReachDistance = 1f;    // how far the hand extends
+        private const float MoveGrabPullDistance = 0.9f;   // how far one pull drags the body
+        private const float MoveGrabRunScale = 1.3f;       // the run key lengthens the pull
+        private const float MoveGrabChestRaise = 0.55f;    // sideways/forward reaches work at chest height
+        private const float MoveGrabMaxDownReach = 0.62f;  // a hand never reaches down at the player's feet
+        private const float MoveGrabRestFraction = 0.22f;  // the idle hand keeps a light hold instead of dropping away
+        private const float MoveGrabUpPullScale = 1.25f;   // pulling up carries further ...
+        private const float MoveGrabDownPullScale = 0.55f; // ... pulling down is deliberately weak
+        private const float MoveGrabLiftBias = 0.22f;      // upward lean baked into every pull
+        private const float MoveGrabSway = 0.05f;          // metres of hip sway toward the pulling hand
+        private const float MoveGrabHandSmooth = 0.05f;    // spring time for the working hand
+        private const float MoveGrabRestSmooth = 0.16f;    // spring time for the idle hand easing back
+        private const float MoveGrabDirSmooth = 0.15f;     // seconds a direction change blends over
+        private const float MoveGrabBodySmooth = 0.08f;    // body weight - a pull eases in, then coasts
+        private const float MoveGrabFloorLift = 0.55f;     // m/s of hoist while down at floor level
+        private const float MoveGrabGroundBand = 0.55f;    // camera height range the floor guard ramps over
+        private const int MoveGrabGroundProbeLimit = 8;    // colliders sampled by the floor probe
 
         // --- Move Grab cycle state ---
         private static bool _moveGrabCycling;
         private static float _moveGrabPhase;
         private static bool _moveGrabLeftActive = true;
+        private static Vector3 _moveGrabDir;          // smoothed reach/pull direction (camera-local)
+        private static float _moveGrabPace = 1f;      // per half-cycle timing wobble
+        private static float _moveGrabLeftPower = 1f; // per half-cycle hand strength
+        private static float _moveGrabRightPower = 1f;
+        private static int _moveGrabCycle;
         private static Vector3 _leftMoveGrabOffset;
         private static Vector3 _rightMoveGrabOffset;
+        private static Vector3 _leftMoveGrabVelocity;
+        private static Vector3 _rightMoveGrabVelocity;
+        private static Vector3 _moveGrabBodyVelocity;
+        private static readonly RaycastHit[] MoveGrabGroundHits = new RaycastHit[MoveGrabGroundProbeLimit];
 
         internal static bool ClimbEverywhereActive { get { return ClimbEverythingPatch.GrabAnywhereEnabled; } }
         internal static bool SpamGrabActive { get { return SpamGrabEnabled && ClimbEverywhereActive; } }
@@ -8221,6 +8268,12 @@ namespace TavernFun
             MelonLogger.Msg("[Move Grab] " + (enabled ? "enabled" : "disabled"));
         }
 
+        internal static void ResetTuning()
+        {
+            PullStrength = 1f;
+            UpAssist = 0.55f;
+        }
+
         internal static void Tick()
         {
             // The extras only make sense on top of Climb Everywhere - drop them if it turns off.
@@ -8234,8 +8287,16 @@ namespace TavernFun
             _moveGrabCycling = false;
             _moveGrabPhase = 0f;
             _moveGrabLeftActive = true;
+            _moveGrabDir = Vector3.zero;
+            _moveGrabPace = 1f;
+            _moveGrabLeftPower = 1f;
+            _moveGrabRightPower = 1f;
+            _moveGrabCycle = 0;
             _leftMoveGrabOffset = Vector3.zero;
             _rightMoveGrabOffset = Vector3.zero;
+            _leftMoveGrabVelocity = Vector3.zero;
+            _rightMoveGrabVelocity = Vector3.zero;
+            _moveGrabBodyVelocity = Vector3.zero;
         }
 
         // Pulses both grab buttons on/off while Spam Grab is on.
@@ -8265,18 +8326,25 @@ namespace TavernFun
             if (!MoveGrabActive || flyActive || cameraTransform == null || deltaTime <= 0f || !hasMove)
             {
                 // Ease both hands back to rest and drop the cycle until keys come back.
-                float settle = 1f - Mathf.Exp(-10f * Mathf.Max(deltaTime, 0f));
-                _leftMoveGrabOffset = Vector3.Lerp(_leftMoveGrabOffset, Vector3.zero, settle);
-                _rightMoveGrabOffset = Vector3.Lerp(_rightMoveGrabOffset, Vector3.zero, settle);
+                float settle = Mathf.Max(deltaTime, 0f);
+                _moveGrabCycling = false;
+                _moveGrabPhase = 0f;
+                _moveGrabDir = Vector3.Lerp(_moveGrabDir, Vector3.zero, 1f - Mathf.Exp(-6f * settle));
+                _moveGrabBodyVelocity = Vector3.Lerp(_moveGrabBodyVelocity, Vector3.zero, 1f - Mathf.Exp(-9f * settle));
+                _leftMoveGrabOffset = SpringMoveGrabOffset(_leftMoveGrabOffset, ref _leftMoveGrabVelocity, Vector3.zero, MoveGrabRestSmooth, settle);
+                _rightMoveGrabOffset = SpringMoveGrabOffset(_rightMoveGrabOffset, ref _rightMoveGrabVelocity, Vector3.zero, MoveGrabRestSmooth, settle);
                 if (left != null) left.MoveGrabPoseOffset = _leftMoveGrabOffset;
                 if (right != null) right.MoveGrabPoseOffset = _rightMoveGrabOffset;
-                if (!hasMove || !MoveGrabActive || flyActive)
-                {
-                    _moveGrabCycling = false;
-                    _moveGrabPhase = 0f;
-                }
                 return Vector3.zero;
             }
+
+            // Floor probe: how close the player is to being on the ground decides how much
+            // lift the pulls get. Never let a climb press the body into the floor.
+            float eyeReference = FlatscreenCore.Instance != null ? FlatscreenCore.Instance.HeightOffset : 1.45f;
+            float guardHeight = Mathf.Max(0.9f, Mathf.Max(eyeReference, 0.6f) * 0.8f);
+            float groundDistance = ProbeGroundDistance(cameraTransform, guardHeight + MoveGrabGroundBand);
+            float floorStick = FloorStick(groundDistance, guardHeight);
+            float assist = Mathf.Clamp01(UpAssist);
 
             // Combined move intent: W/S/A/D on the horizontal plane plus Space/Ctrl vertically.
             Vector3 dirWorld = move;
@@ -8285,72 +8353,209 @@ namespace TavernFun
             Quaternion yaw = Quaternion.Euler(0f, cameraTransform.eulerAngles.y, 0f);
             Vector3 dirLocal = Quaternion.Inverse(yaw) * dirWorld;
 
+            // Blend the requested direction so changing keys eases the reach across instead
+            // of snapping the hand (and with it the body) onto a new heading.
+            _moveGrabDir = Vector3.Lerp(_moveGrabDir, dirLocal, 1f - Mathf.Exp(-deltaTime / MoveGrabDirSmooth));
+            if (_moveGrabDir.sqrMagnitude > 1f) _moveGrabDir.Normalize();
+            Vector3 dir = _moveGrabDir;
+
+            // Climbing should climb: every pull leans a little upward, and the lean grows
+            // the lower the player is, so a pull at floor level lifts instead of sinking.
+            float vertical = Mathf.Clamp(dir.y, -1f, 1f);
+            float lean = MoveGrabLiftBias * assist * Mathf.Lerp(0.3f, 1f, floorStick) * (1f - Mathf.Abs(vertical));
+            Vector3 pullDir = new Vector3(dir.x, Mathf.Clamp(vertical + lean, -1f, 1f), dir.z);
+            if (pullDir.sqrMagnitude > 1f) pullDir.Normalize();
+
             if (!_moveGrabCycling)
             {
                 _moveGrabCycling = true;
                 _moveGrabPhase = 0f;
+                _moveGrabCycle = 0;
+                _moveGrabLeftActive = true;
+                RollMoveGrabVariation();
             }
 
-            _moveGrabPhase += deltaTime / MoveGrabHalfCycle;
+            float halfCycle = MoveGrabHalfCycle * _moveGrabPace;
+            _moveGrabPhase += deltaTime / Mathf.Max(halfCycle, 0.08f);
             while (_moveGrabPhase >= 1f)
             {
                 _moveGrabPhase -= 1f;
                 _moveGrabLeftActive = !_moveGrabLeftActive; // one hand, then the next
+                RollMoveGrabVariation();
             }
 
-            // Reach target in camera-local space: out toward the move direction, raised a
-            // little for the sideways/forward reaches so the hands work at chest height.
-            Vector3 reachOffset = dirLocal * MoveGrabReachDistance;
-            if (Mathf.Abs(dirLocal.y) < 0.5f) reachOffset.y += 0.55f;
-            reachOffset.x += _moveGrabLeftActive ? -0.08f : 0.08f; // keep the hands apart
+            // Reach target in camera-local space: out toward the move direction, raised for
+            // the sideways/forward reaches so the hands work at chest height. The downward
+            // reach is capped (tighter still near the floor) so a hold is never planted
+            // down at the player's feet, which is what used to sink the whole body.
+            Vector3 reachOffset = MoveGrabReachPoint(dir, _moveGrabLeftActive, floorStick);
+            Vector3 restOffset = MoveGrabReachPoint(dir, !_moveGrabLeftActive, floorStick) * MoveGrabRestFraction;
 
-            float pullDistance = MoveGrabPullDistance * (input.IsRunPressed ? 1.35f : 1f);
+            float handPower = _moveGrabLeftActive ? _moveGrabLeftPower : _moveGrabRightPower;
+            float pullDistance = MoveGrabPullDistance * PullStrength * handPower * VerticalDistanceScale(pullDir.y);
+            if (input != null && input.IsRunPressed) pullDistance *= MoveGrabRunScale;
+
+            float pullFraction = Mathf.Max(1f - MoveGrabReachFraction - MoveGrabHoldFraction, 0.05f);
+            float pullDuration = Mathf.Max(halfCycle * pullFraction, 0.05f);
             Vector3 activeOffset;
-            Vector3 bodyDelta;
+            Vector3 bodyVelocity;
+            float swayEnvelope = 0f;
             if (_moveGrabPhase < MoveGrabReachFraction)
             {
-                // Reach: the working hand extends out to the grab point. Body holds still.
+                // Reach: the working hand extends out to the next hold and the body hangs
+                // still - the arm leads, exactly like a climber feeling for the next grip.
                 float t = _moveGrabPhase / MoveGrabReachFraction;
-                t = t * t * (3f - 2f * t); // smoothstep
-                activeOffset = reachOffset * t;
-                bodyDelta = Vector3.zero;
+                float ease = t * t * (3f - 2f * t); // smoothstep out, easing as it plants
+                activeOffset = reachOffset * ease;
+                bodyVelocity = Vector3.zero;
+            }
+            else if (_moveGrabPhase < MoveGrabReachFraction + pullFraction)
+            {
+                // Pull: the hand keeps its bite on the hold while the body swings up to it.
+                // The travel follows an ease-in/ease-out curve, so the pull starts as a hang
+                // and settles at the end instead of stopping dead at full speed.
+                float t = (_moveGrabPhase - MoveGrabReachFraction) / pullFraction;
+                float ease = t * t * (3f - 2f * t);
+                activeOffset = reachOffset - pullDir * (pullDistance * ease);
+                bodyVelocity = yaw * pullDir * (pullDistance * (6f * t * (1f - t)) / pullDuration);
+                swayEnvelope = Mathf.Sin(Mathf.PI * t);
             }
             else
             {
-                // Pull: the hand stays anchored in the world (its camera-local offset comes
-                // back) while the body drags along in the move direction.
-                float t = (_moveGrabPhase - MoveGrabReachFraction) / (1f - MoveGrabReachFraction);
-                activeOffset = reachOffset - dirLocal * (pullDistance * t);
-                float pullDuration = MoveGrabHalfCycle * (1f - MoveGrabReachFraction);
-                bodyDelta = dirWorld * (pullDistance * (deltaTime / pullDuration));
+                // Hold: both hands are set and the body rests for a beat before the next
+                // hand goes, which is what makes the alternation feel like a rhythm.
+                activeOffset = reachOffset - pullDir * pullDistance;
+                bodyVelocity = Vector3.zero;
             }
-            activeOffset.x = Mathf.Clamp(activeOffset.x, -1.2f, 1.2f);
-            activeOffset.y = Mathf.Clamp(activeOffset.y, -1.6f, 1.4f);
-            activeOffset.z = Mathf.Clamp(activeOffset.z, -1.4f, 1.4f);
+            ClampMoveGrabOffset(ref activeOffset);
+            ClampMoveGrabOffset(ref restOffset);
 
             if (_moveGrabLeftActive)
             {
-                _leftMoveGrabOffset = activeOffset;
+                _leftMoveGrabOffset = SpringMoveGrabOffset(_leftMoveGrabOffset, ref _leftMoveGrabVelocity, activeOffset, MoveGrabHandSmooth, deltaTime);
+                _rightMoveGrabOffset = SpringMoveGrabOffset(_rightMoveGrabOffset, ref _rightMoveGrabVelocity, restOffset, MoveGrabRestSmooth, deltaTime);
                 leftGrab = true;
                 if (left != null) left.IsClimbingGrabActive = true;
             }
             else
             {
-                _rightMoveGrabOffset = activeOffset;
+                _rightMoveGrabOffset = SpringMoveGrabOffset(_rightMoveGrabOffset, ref _rightMoveGrabVelocity, activeOffset, MoveGrabHandSmooth, deltaTime);
+                _leftMoveGrabOffset = SpringMoveGrabOffset(_leftMoveGrabOffset, ref _leftMoveGrabVelocity, restOffset, MoveGrabRestSmooth, deltaTime);
                 rightGrab = true;
                 if (right != null) right.IsClimbingGrabActive = true;
             }
 
-            // The resting hand eases home while the other one works.
-            float recover = 1f - Mathf.Exp(-10f * deltaTime);
-            if (_moveGrabLeftActive)
-                _rightMoveGrabOffset = Vector3.Lerp(_rightMoveGrabOffset, Vector3.zero, recover);
-            else
-                _leftMoveGrabOffset = Vector3.Lerp(_leftMoveGrabOffset, Vector3.zero, recover);
-
             if (left != null) left.MoveGrabPoseOffset = _leftMoveGrabOffset;
             if (right != null) right.MoveGrabPoseOffset = _rightMoveGrabOffset;
+
+            // Body weight: the pull eases in and coasts a little instead of snapping on and
+            // off, so the player reads as a mass being moved by their arms.
+            _moveGrabBodyVelocity = Vector3.Lerp(_moveGrabBodyVelocity, bodyVelocity, 1f - Mathf.Exp(-deltaTime / MoveGrabBodySmooth));
+            Vector3 bodyDelta = _moveGrabBodyVelocity * deltaTime;
+
+            // Hip sway: the body leans a little toward the hand that carries the weight.
+            if (swayEnvelope > 0f)
+            {
+                Vector3 swayAxis = yaw * Vector3.right;
+                float swaySign = _moveGrabLeftActive ? -1f : 1f;
+                bodyDelta += swayAxis * (swaySign * MoveGrabSway * swayEnvelope * (deltaTime / pullDuration));
+            }
+
+            // Floor guard: while the player is down near the ground, never drag the body
+            // any further down and let the pulls hoist them back clear of the floor.
+            if (floorStick > 0f)
+            {
+                if (bodyDelta.y < 0f) bodyDelta.y *= 1f - floorStick;
+                bodyDelta.y += MoveGrabFloorLift * assist * floorStick * deltaTime;
+            }
             return bodyDelta;
+        }
+
+        // One reach point in camera-local space: out along the move direction, raised to
+        // chest height for the sideways/forward reaches, kept a little apart from the other
+        // hand, and never dropped down at the player's feet.
+        private static Vector3 MoveGrabReachPoint(Vector3 dir, bool isLeft, float floorStick)
+        {
+            float low = Mathf.Clamp01(floorStick);
+            Vector3 offset = dir * MoveGrabReachDistance;
+            // Sideways/forward holds sit at chest height, and they are aimed a little higher
+            // again while the player is down at floor level so the climb starts by going up.
+            if (Mathf.Abs(dir.y) < 0.5f) offset.y += MoveGrabChestRaise * (1f + 0.5f * low);
+            float downReach = MoveGrabMaxDownReach * (1f - 0.6f * low);
+            offset.y = Mathf.Max(offset.y, -downReach);
+            offset.x += isLeft ? -0.08f : 0.08f;
+            return offset;
+        }
+
+        // Vertical pulls trade distance for direction: hauling up carries further, lowering
+        // down is much shorter so a Ctrl pull can never dump the player onto the floor.
+        private static float VerticalDistanceScale(float vertical)
+        {
+            if (vertical >= 0f) return Mathf.Lerp(1f, MoveGrabUpPullScale, vertical);
+            return Mathf.Lerp(1f, MoveGrabDownPullScale, -vertical);
+        }
+
+        private static void ClampMoveGrabOffset(ref Vector3 offset)
+        {
+            offset.x = Mathf.Clamp(offset.x, -1.2f, 1.2f);
+            offset.y = Mathf.Clamp(offset.y, -1.6f, 1.4f);
+            offset.z = Mathf.Clamp(offset.z, -1.4f, 1.4f);
+        }
+
+        // Critically damped spring (the same maths as Vector3.SmoothDamp) so the hands ease
+        // into a reach and settle back out instead of snapping between poses.
+        private static Vector3 SpringMoveGrabOffset(Vector3 current, ref Vector3 velocity, Vector3 target, float smoothTime, float deltaTime)
+        {
+            if (deltaTime <= 0f || smoothTime <= 0f) return current;
+            float omega = 2f / smoothTime;
+            float x = omega * deltaTime;
+            float decay = 1f / (1f + x + 0.48f * x * x + 0.235f * x * x * x);
+            Vector3 change = current - target;
+            Vector3 temp = (velocity + omega * change) * deltaTime;
+            velocity = (velocity - omega * temp) * decay;
+            return target + (change + temp) * decay;
+        }
+
+        // Rerolls the per-half-cycle wobble. Humans keep a rhythm but never a metronome,
+        // and the two hands never pull with quite the same strength or timing.
+        private static void RollMoveGrabVariation()
+        {
+            _moveGrabCycle++;
+            float wobble = Mathf.Sin(_moveGrabCycle * 0.618034f * 6.2831853f);
+            _moveGrabPace = 1f + wobble * 0.12f;
+            _moveGrabLeftPower = 1f + wobble * 0.07f;
+            _moveGrabRightPower = 1f - wobble * 0.06f;
+        }
+
+        // Distance from the camera down to the first solid floor-ish surface underneath it.
+        // The player's own body is ignored (the camera hangs under the player root), and
+        // only upward-facing surfaces count, so a held blade or a wall is not read as ground.
+        private static float ProbeGroundDistance(Transform cameraTransform, float maxDistance)
+        {
+            try
+            {
+                int count = Physics.RaycastNonAlloc(cameraTransform.position, Vector3.down, MoveGrabGroundHits, maxDistance, ~0, QueryTriggerInteraction.Ignore);
+                Transform playerRoot = cameraTransform.root;
+                float closest = float.PositiveInfinity;
+                for (int i = 0; i < count; i++)
+                {
+                    Collider hitCollider = MoveGrabGroundHits[i].collider;
+                    if (hitCollider == null) continue;
+                    if (playerRoot != null && hitCollider.transform.root == playerRoot) continue;
+                    if (MoveGrabGroundHits[i].normal.y < 0.5f) continue;
+                    if (MoveGrabGroundHits[i].distance < closest) closest = MoveGrabGroundHits[i].distance;
+                }
+                return closest;
+            }
+            catch { return float.PositiveInfinity; }
+        }
+
+        // 0 = well clear of the ground, 1 = down at floor level. Scaled against the
+        // configured camera height so a low camera setting is not misread as "on the floor".
+        private static float FloorStick(float groundDistance, float guardHeight)
+        {
+            if (float.IsInfinity(groundDistance)) return 0f;
+            return Mathf.Clamp01((guardHeight - groundDistance) / MoveGrabGroundBand);
         }
     }
 
