@@ -1939,7 +1939,7 @@ namespace TavernFun
             _lastClimbingMenuRect = outerRect;
 
             var shadowRect = new Rect(outerRect.x + 4f, outerRect.y + 5f, outerRect.width, outerRect.height);
-            GUI.DrawTexture(shadowRect, _outerShadowTexture, Mode.StretchToFill);
+            GUI.DrawTexture(shadowRect, _outerShadowTexture, ScaleMode.StretchToFill);
             GUI.DrawTexture(outerRect, _outerFrameTexture, ScaleMode.StretchToFill);
 
             var titleRect = new Rect(
