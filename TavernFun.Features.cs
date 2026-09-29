@@ -185,6 +185,15 @@ namespace TavernFun
         private string _customGrabAmount = "";
         private const int GrabMenuWidth = 260;
         private const int GrabMenuHeight = 420;
+        // --- Climbing Stuff menu (Player tab) - pop-out with the Climb Everywhere /
+        // Climb Everything toggles plus the Climb Everywhere extras: Spam Grab + Move Grab.
+        private bool _climbingMenuOpen;
+        private Vector2 _climbingMenuPosition = new Vector2(620f, 120f);
+        private bool _isDraggingClimbingMenu;
+        private Vector2 _dragOffsetClimbingMenu;
+        private Rect _lastClimbingMenuRect;
+        private const int ClimbingMenuWidth = 240;
+        private const int ClimbingMenuHeight = 224;
         private static readonly Color32 OuterFrameColor = new Color32(198, 166, 130, 255);
         private static readonly Color32 OuterFrameShadow = new Color32(140, 112, 82, 255);
         private static readonly Color32 InnerBackgroundColor = new Color32(36, 24, 16, 255);
@@ -263,7 +272,7 @@ namespace TavernFun
         public void Update()
         {
             if (_input.IsMenuTogglePressed) { IsVisible = !IsVisible; }
-            IsCursorFree = IsVisible || _panKakePanelOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen || _arrowSettingsMenuOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _climbingMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen || _arrowSettingsMenuOpen;
             _flatscreen.Tick();
             _weather.Tick();
             _graphics.Tick();
@@ -277,6 +286,7 @@ namespace TavernFun
             _revive.Tick();
             _worldTools.Tick();
             ClimbEverythingPatch.Tick();
+            ClimbingStuffController.Tick();
             ArrowThrowController.Tick();
         }
         public void LateUpdate()
@@ -309,6 +319,10 @@ namespace TavernFun
                 if (_grabMenuOpen)
                 {
                     DrawGrabMenu();
+                }
+                if (_climbingMenuOpen)
+                {
+                    DrawClimbingMenu();
                 }
                 if (_fingerMenuOpen)
                 {
@@ -361,6 +375,7 @@ namespace TavernFun
                 IsPointerOverUI = (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                                                 || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
                                                 || (_grabMenuOpen && _lastGrabMenuRect.Contains(mousePos))
+                                                || (_climbingMenuOpen && _lastClimbingMenuRect.Contains(mousePos))
                                                 || (_weatherMenuOpen && _lastWeatherMenuRect.Contains(mousePos))
                                                 || (_perfMenuOpen && _lastPerfMenuRect.Contains(mousePos))
                                                 || (_handRotMenuOpen && _lastHandRotMenuRect.Contains(mousePos))
@@ -373,8 +388,8 @@ namespace TavernFun
                                                 || (_devToolsMenuOpen && _lastDevToolsMenuRect.Contains(mousePos))
                                                 || (_espMenuOpen && _lastEspMenuRect.Contains(mousePos))
                                                 || (_teleportsMenuOpen && _lastTeleportsMenuRect.Contains(mousePos))
-                                                || (_arrowSettingsMenuOpen && _lastArrowSettingsMenuRect.Contains(mousePos));
-                IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen || _arrowSettingsMenuOpen;
+                                || (_arrowSettingsMenuOpen && _lastArrowSettingsMenuRect.Contains(mousePos));
+                IsCursorFree = IsVisible || _panKakePanelOpen || _climbingMenuOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen || _arrowSettingsMenuOpen;
                 DevToolsDebugOverlay.Draw();
                 return;
             }
@@ -437,6 +452,10 @@ namespace TavernFun
             {
                 DrawGrabMenu();
             }
+            if (_climbingMenuOpen)
+            {
+                DrawClimbingMenu();
+            }
             if (_weatherMenuOpen)
             {
                 DrawWeatherMenu();
@@ -488,6 +507,7 @@ namespace TavernFun
                             || (_panKakePanelOpen && _lastPanKakeRect.Contains(mousePos))
                             || (_voidMenuOpen && _lastVoidMenuRect.Contains(mousePos))
                             || (_grabMenuOpen && _lastGrabMenuRect.Contains(mousePos))
+                            || (_climbingMenuOpen && _lastClimbingMenuRect.Contains(mousePos))
                             || (_handRotMenuOpen && _lastHandRotMenuRect.Contains(mousePos))
                             || (_weatherMenuOpen && _lastWeatherMenuRect.Contains(mousePos))
                             || (_fingerMenuOpen && _lastFingerMenuRect.Contains(mousePos))
@@ -501,7 +521,7 @@ namespace TavernFun
                             || (_espMenuOpen && _lastEspMenuRect.Contains(mousePos))
                             || (_teleportsMenuOpen && _lastTeleportsMenuRect.Contains(mousePos))
                             || (_arrowSettingsMenuOpen && _lastArrowSettingsMenuRect.Contains(mousePos));
-            IsCursorFree = IsVisible || _panKakePanelOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen || _arrowSettingsMenuOpen;
+            IsCursorFree = IsVisible || _panKakePanelOpen || _climbingMenuOpen || _voidMenuOpen || _grabMenuOpen || _weatherMenuOpen || _perfMenuOpen || _particlesMenuOpen || _jeanGreyMenuOpen || _fovMenuOpen || _tpEffectsMenuOpen || _devToolsMenuOpen || _espMenuOpen || _teleportsMenuOpen || _arrowSettingsMenuOpen;
             DevToolsDebugOverlay.Draw();
         }
 
@@ -1584,13 +1604,10 @@ namespace TavernFun
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
             GUILayout.BeginHorizontal();
-            Rect grabAnywhereRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
-            if (DrawGoldButton(grabAnywhereRect, "Grab Anywhere", ClimbEverythingPatch.GrabAnywhereEnabled, false))
-                ClimbEverythingPatch.SetGrabAnywhereEnabled(!ClimbEverythingPatch.GrabAnywhereEnabled);
+            Rect climbingStuffRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
+            if (DrawGoldButton(climbingStuffRect, "Climbing Stuff", _climbingMenuOpen, false))
+                _climbingMenuOpen = true;
             GUILayout.FlexibleSpace();
-            Rect grabAnythingRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.Width(140f));
-            if (DrawGoldButton(grabAnythingRect, "Grab Anything", ClimbEverythingPatch.GrabAnythingEnabled, false))
-                ClimbEverythingPatch.SetGrabAnythingEnabled(!ClimbEverythingPatch.GrabAnythingEnabled);
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
             GUILayout.BeginHorizontal();
@@ -1912,6 +1929,100 @@ namespace TavernFun
             GUILayout.EndHorizontal();
             return newValue;
         }
+        // Climbing Stuff pop-out: holds the Climb Everywhere / Climb Everything toggles and,
+        // while Climb Everywhere is on, the two extras - Spam Grab and Move Grab.
+        private void DrawClimbingMenu()
+        {
+            EnsureStyles();
+
+            var outerRect = new Rect(_climbingMenuPosition.x, _climbingMenuPosition.y, ClimbingMenuWidth, ClimbingMenuHeight);
+            _lastClimbingMenuRect = outerRect;
+
+            var shadowRect = new Rect(outerRect.x + 4f, outerRect.y + 5f, outerRect.width, outerRect.height);
+            GUI.DrawTexture(shadowRect, _outerShadowTexture, Mode.StretchToFill);
+            GUI.DrawTexture(outerRect, _outerFrameTexture, ScaleMode.StretchToFill);
+
+            var titleRect = new Rect(
+                outerRect.x + OuterFramePadding,
+                outerRect.y + OuterFramePadding,
+                outerRect.width - OuterFramePadding * 2f,
+                TitleBarHeight);
+
+            GUI.DrawTexture(titleRect, _titleBarTexture, ScaleMode.StretchToFill);
+            GUI.Label(
+                new Rect(titleRect.x, titleRect.y + 1f, titleRect.width, titleRect.height),
+                "CLIMBING STUFF",
+                _titleShadowStyle);
+            GUI.Label(titleRect, "CLIMBING STUFF", _titleLabelStyle);
+
+            HandleDrag(
+                titleRect,
+                ref _climbingMenuPosition,
+                ref _isDraggingClimbingMenu,
+                ref _dragOffsetClimbingMenu);
+
+            var innerRect = new Rect(
+                outerRect.x + OuterFramePadding,
+                titleRect.yMax + 4f,
+                outerRect.width - OuterFramePadding * 2f,
+                outerRect.height - OuterFramePadding - TitleBarHeight - 8f);
+
+            GUI.DrawTexture(innerRect, _innerBackgroundTexture, ScaleMode.StretchToFill);
+
+            GUILayout.BeginArea(innerRect);
+
+            // Close
+            Rect closeRect = GUILayoutUtility.GetRect(60f, ActionButtonHeight, GUILayout.Width(60f));
+            if (DrawGoldButton(closeRect, "Close", false, false))
+            {
+                _climbingMenuOpen = false;
+            }
+            GUILayout.Space(4f);
+
+            // The two climb toggles (these used to live on the Player tab directly).
+            Rect climbEverywhereRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.ExpandWidth(true));
+            if (DrawGoldButton(climbEverywhereRect, ClimbEverythingPatch.GrabAnywhereEnabled ? "Climb Everywhere: On" : "Climb Everywhere: Off", ClimbEverythingPatch.GrabAnywhereEnabled, false))
+            {
+                ClimbEverythingPatch.SetGrabAnywhereEnabled(!ClimbEverythingPatch.GrabAnywhereEnabled);
+            }
+            GUILayout.Space(4f);
+
+            Rect climbEverythingRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.ExpandWidth(true));
+            if (DrawGoldButton(climbEverythingRect, ClimbEverythingPatch.GrabAnythingEnabled ? "Climb Everything: On" : "Climb Everything: Off", ClimbEverythingPatch.GrabAnythingEnabled, false))
+            {
+                ClimbEverythingPatch.SetGrabAnythingEnabled(!ClimbEverythingPatch.GrabAnythingEnabled);
+            }
+            GUILayout.Space(4f);
+
+            // The extras only show while Climb Everywhere is on.
+            if (ClimbEverythingPatch.GrabAnywhereEnabled)
+            {
+                Rect spamGrabRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.ExpandWidth(true));
+                if (DrawGoldButton(spamGrabRect, ClimbingStuffController.SpamGrabEnabled ? "Spam Grab: On" : "Spam Grab: Off", ClimbingStuffController.SpamGrabEnabled, false))
+                {
+                    ClimbingStuffController.SetSpamGrabEnabled(!ClimbingStuffController.SpamGrabEnabled);
+                }
+                GUILayout.Space(4f);
+
+                Rect moveGrabRect = GUILayoutUtility.GetRect(1f, ActionButtonHeight, GUILayout.ExpandWidth(true));
+                if (DrawGoldButton(moveGrabRect, ClimbingStuffController.MoveGrabEnabled ? "Move Grab: On" : "Move Grab: Off", ClimbingStuffController.MoveGrabEnabled, false))
+                {
+                    ClimbingStuffController.SetMoveGrabEnabled(!ClimbingStuffController.MoveGrabEnabled);
+                }
+                GUILayout.Space(6f);
+
+                GUILayout.Label("Move Grab: W/S/A/D reach + pull", _labelStyle);
+                GUILayout.Label("Space pulls up, Ctrl pulls down", _labelStyle);
+            }
+            else
+            {
+                GUILayout.Label("Turn on Climb Everywhere", _labelStyle);
+                GUILayout.Label("for Spam Grab + Move Grab", _labelStyle);
+            }
+
+            GUILayout.EndArea();
+        }
+
         private void DrawGrabMenu()
         {
             EnsureStyles();
@@ -8063,6 +8174,183 @@ namespace TavernFun
         {
             if (anchor != null && anchor.GameObject != null) UnityEngine.Object.Destroy(anchor.GameObject);
             Anchors.Remove(key);
+        }
+    }
+
+    // Climb Everywhere extras shown in the Climbing Stuff menu.
+    //  - Spam Grab: rapidly pulses the grab button on both hands (just spam grabbing).
+    //  - Move Grab: keyboard reach-and-pull climbing. Pressing W makes one hand reach in
+    //    front and pull, then the next hand repeats (alternating). S does the opposite
+    //    (reaches behind and pulls backwards), A/D reach out to the side and pull, Space
+    //    reaches up and pulls, Ctrl pulls straight down. Both extras only run while
+    //    Climb Everywhere (Grab Anywhere) is enabled.
+    internal static class ClimbingStuffController
+    {
+        // --- Spam Grab ---
+        internal static bool SpamGrabEnabled;
+        private const float SpamGrabRate = 12f; // grab flips per second
+
+        // --- Move Grab cycle tuning ---
+        internal static bool MoveGrabEnabled;
+        private const float MoveGrabHalfCycle = 0.45f;     // seconds per hand
+        private const float MoveGrabReachFraction = 0.32f; // first part of a half-cycle reaches out
+        private const float MoveGrabReachDistance = 1.05f; // how far the hand extends
+        private const float MoveGrabPullDistance = 0.95f;  // how far one pull drags the body
+
+        // --- Move Grab cycle state ---
+        private static bool _moveGrabCycling;
+        private static float _moveGrabPhase;
+        private static bool _moveGrabLeftActive = true;
+        private static Vector3 _leftMoveGrabOffset;
+        private static Vector3 _rightMoveGrabOffset;
+
+        internal static bool ClimbEverywhereActive { get { return ClimbEverythingPatch.GrabAnywhereEnabled; } }
+        internal static bool SpamGrabActive { get { return SpamGrabEnabled && ClimbEverywhereActive; } }
+        internal static bool MoveGrabActive { get { return MoveGrabEnabled && ClimbEverywhereActive; } }
+
+        internal static void SetSpamGrabEnabled(bool enabled)
+        {
+            SpamGrabEnabled = enabled;
+            MelonLogger.Msg("[Spam Grab] " + (enabled ? "enabled" : "disabled"));
+        }
+
+        internal static void SetMoveGrabEnabled(bool enabled)
+        {
+            MoveGrabEnabled = enabled;
+            if (!enabled) ResetMoveGrab();
+            MelonLogger.Msg("[Move Grab] " + (enabled ? "enabled" : "disabled"));
+        }
+
+        internal static void Tick()
+        {
+            // The extras only make sense on top of Climb Everywhere - drop them if it turns off.
+            if (ClimbEverywhereActive) return;
+            if (SpamGrabEnabled) SetSpamGrabEnabled(false);
+            if (MoveGrabEnabled) SetMoveGrabEnabled(false);
+        }
+
+        internal static void ResetMoveGrab()
+        {
+            _moveGrabCycling = false;
+            _moveGrabPhase = 0f;
+            _moveGrabLeftActive = true;
+            _leftMoveGrabOffset = Vector3.zero;
+            _rightMoveGrabOffset = Vector3.zero;
+        }
+
+        // Pulses both grab buttons on/off while Spam Grab is on.
+        internal static void ApplySpamGrab(ref bool leftGrab, ref bool rightGrab)
+        {
+            if (!SpamGrabActive) return;
+            bool pulse = (Mathf.FloorToInt(Time.unscaledTime * SpamGrabRate) & 1) == 0;
+            leftGrab = pulse;
+            rightGrab = pulse;
+        }
+
+        // Drives the alternating reach-and-pull hands. Grab flags are forced on for the
+        // working hand while it reaches/pulls; the returned vector is this frame's body
+        // pull translation (zero when Move Grab is idle).
+        internal static Vector3 UpdateMoveGrab(DesktopInput input, Transform cameraTransform, float deltaTime, HandEmulator.HandState left, HandEmulator.HandState right, ref bool leftGrab, ref bool rightGrab)
+        {
+            Vector3 move = Vector3.zero;
+            if (input != null)
+            {
+                move = input.ReadMoveVector();
+                if (input.IsMenuFlyUpPressed) move += Vector3.up;
+                if (input.IsMenuFlyDownPressed) move -= Vector3.up;
+            }
+            bool hasMove = move.sqrMagnitude > 0.0001f;
+            // Fly mode owns the movement keys when it is on - stay out of its way.
+            bool flyActive = FlatscreenCore.Instance != null && FlatscreenCore.Instance.FlyModeEnabled;
+            if (!MoveGrabActive || flyActive || cameraTransform == null || deltaTime <= 0f || !hasMove)
+            {
+                // Ease both hands back to rest and drop the cycle until keys come back.
+                float settle = 1f - Mathf.Exp(-10f * Mathf.Max(deltaTime, 0f));
+                _leftMoveGrabOffset = Vector3.Lerp(_leftMoveGrabOffset, Vector3.zero, settle);
+                _rightMoveGrabOffset = Vector3.Lerp(_rightMoveGrabOffset, Vector3.zero, settle);
+                if (left != null) left.MoveGrabPoseOffset = _leftMoveGrabOffset;
+                if (right != null) right.MoveGrabPoseOffset = _rightMoveGrabOffset;
+                if (!hasMove || !MoveGrabActive || flyActive)
+                {
+                    _moveGrabCycling = false;
+                    _moveGrabPhase = 0f;
+                }
+                return Vector3.zero;
+            }
+
+            // Combined move intent: W/S/A/D on the horizontal plane plus Space/Ctrl vertically.
+            Vector3 dirWorld = move;
+            if (dirWorld.sqrMagnitude > 1f) dirWorld.Normalize();
+
+            Quaternion yaw = Quaternion.Euler(0f, cameraTransform.eulerAngles.y, 0f);
+            Vector3 dirLocal = Quaternion.Inverse(yaw) * dirWorld;
+
+            if (!_moveGrabCycling)
+            {
+                _moveGrabCycling = true;
+                _moveGrabPhase = 0f;
+            }
+
+            _moveGrabPhase += deltaTime / MoveGrabHalfCycle;
+            while (_moveGrabPhase >= 1f)
+            {
+                _moveGrabPhase -= 1f;
+                _moveGrabLeftActive = !_moveGrabLeftActive; // one hand, then the next
+            }
+
+            // Reach target in camera-local space: out toward the move direction, raised a
+            // little for the sideways/forward reaches so the hands work at chest height.
+            Vector3 reachOffset = dirLocal * MoveGrabReachDistance;
+            if (Mathf.Abs(dirLocal.y) < 0.5f) reachOffset.y += 0.55f;
+            reachOffset.x += _moveGrabLeftActive ? -0.08f : 0.08f; // keep the hands apart
+
+            float pullDistance = MoveGrabPullDistance * (input.IsRunPressed ? 1.35f : 1f);
+            Vector3 activeOffset;
+            Vector3 bodyDelta;
+            if (_moveGrabPhase < MoveGrabReachFraction)
+            {
+                // Reach: the working hand extends out to the grab point. Body holds still.
+                float t = _moveGrabPhase / MoveGrabReachFraction;
+                t = t * t * (3f - 2f * t); // smoothstep
+                activeOffset = reachOffset * t;
+                bodyDelta = Vector3.zero;
+            }
+            else
+            {
+                // Pull: the hand stays anchored in the world (its camera-local offset comes
+                // back) while the body drags along in the move direction.
+                float t = (_moveGrabPhase - MoveGrabReachFraction) / (1f - MoveGrabReachFraction);
+                activeOffset = reachOffset - dirLocal * (pullDistance * t);
+                float pullDuration = MoveGrabHalfCycle * (1f - MoveGrabReachFraction);
+                bodyDelta = dirWorld * (pullDistance * (deltaTime / pullDuration));
+            }
+            activeOffset.x = Mathf.Clamp(activeOffset.x, -1.2f, 1.2f);
+            activeOffset.y = Mathf.Clamp(activeOffset.y, -1.6f, 1.4f);
+            activeOffset.z = Mathf.Clamp(activeOffset.z, -1.4f, 1.4f);
+
+            if (_moveGrabLeftActive)
+            {
+                _leftMoveGrabOffset = activeOffset;
+                leftGrab = true;
+                if (left != null) left.IsClimbingGrabActive = true;
+            }
+            else
+            {
+                _rightMoveGrabOffset = activeOffset;
+                rightGrab = true;
+                if (right != null) right.IsClimbingGrabActive = true;
+            }
+
+            // The resting hand eases home while the other one works.
+            float recover = 1f - Mathf.Exp(-10f * deltaTime);
+            if (_moveGrabLeftActive)
+                _rightMoveGrabOffset = Vector3.Lerp(_rightMoveGrabOffset, Vector3.zero, recover);
+            else
+                _leftMoveGrabOffset = Vector3.Lerp(_leftMoveGrabOffset, Vector3.zero, recover);
+
+            if (left != null) left.MoveGrabPoseOffset = _leftMoveGrabOffset;
+            if (right != null) right.MoveGrabPoseOffset = _rightMoveGrabOffset;
+            return bodyDelta;
         }
     }
 

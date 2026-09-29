@@ -760,7 +760,7 @@ namespace TavernFun
                 return;
             }
             FlatscreenCore.SuppressOpenXRInputUpdates = true;
-            this._input.SuppressCombatInput = this._flyModeEnabled;
+            this._input.SuppressCombatInput = this._flyModeEnabled || ClimbingStuffController.MoveGrabActive;
             FlatscreenCore.SuppressOpenXRInputUpdates = true;
             if (!this._input.IsAvailable)
             {
@@ -1436,6 +1436,11 @@ namespace TavernFun
         private void MovePlayer(object player, object controller, Transform playerTransform)
         {
             if (FlatscreenCore.SuppressPlayerMovement)
+            {
+                return;
+            }
+            // Move Grab replaces the walk keys with reach-and-pull movement (fly keeps them).
+            if (!this._flyModeEnabled && ClimbingStuffController.MoveGrabActive)
             {
                 return;
             }
@@ -2639,6 +2644,11 @@ namespace TavernFun
                 }
             }
             this.UpdateClimbing(input, cameraTransform);
+            // --- Climbing Stuff extras: Move Grab drives the alternating reach-pull hands
+            // (and drags the body through the climb translation), Spam Grab pulses grabbing.
+            bool moveGrabLeftGrab = false;
+            bool moveGrabRightGrab = false;
+            this._climbBodyTranslation += ClimbingStuffController.UpdateMoveGrab(input, cameraTransform, Time.deltaTime, this._left, this._right, ref moveGrabLeftGrab, ref moveGrabRightGrab);
             bool isTeleporting = input.IsTeleportPressed && !input.HasMoveInput && !input.IsRunPressed;
             bool flag = this.ClimbingModeEnabled ? input.IsLeftGrabPressed : this._leftGrabToggle;
             bool flag2 = this.ClimbingModeEnabled ? input.IsRightGrabPressed : this._rightGrabToggle;
@@ -2646,6 +2656,15 @@ namespace TavernFun
             {
                 flag2 = true;
             }
+            if (moveGrabLeftGrab)
+            {
+                flag = true;
+            }
+            if (moveGrabRightGrab)
+            {
+                flag2 = true;
+            }
+            ClimbingStuffController.ApplySpamGrab(ref flag, ref flag2);
             this.UpdateCombat(input, flag, flag2);
             this.UpdateQuickAccess(input);
             HandEmulator.ApplyHand(game, leftInput, this._left, this._leftSelectedToggle, input.IsLeftFacePressed, this._bagAssistActive, this._bagAssistPosition, this._bagAssistRotation, flag, isTeleporting, lookPoint, input, cameraTransform, true, false);
@@ -2672,6 +2691,7 @@ namespace TavernFun
                     Vector3 vector = state.BaseOffset;
                     vector.z = state.Depth;
                     vector += state.ClimbPoseOffset;
+                    vector += state.MoveGrabPoseOffset;
                     vector += state.CombatPoseOffset;
                     Quaternion quaternion = Quaternion.Euler(0f, cameraTransform.eulerAngles.y, 0f);
                     float num = state.VerticalAngle - state.DefaultVerticalAngle;
@@ -2923,7 +2943,7 @@ namespace TavernFun
         private float _combatSensitivity = 1f;
 
         // Token: 0x02000009 RID: 9
-        private sealed class HandState
+        internal sealed class HandState
         {
             // Token: 0x0600010A RID: 266 RVA: 0x0000A58B File Offset: 0x0000878B
             public HandState(Vector3 baseOffset, float horizontalAngle, float verticalAngle)
@@ -2994,6 +3014,7 @@ namespace TavernFun
             public void ResetClimb()
             {
                 this.ClimbPoseOffset = Vector3.zero;
+                this.MoveGrabPoseOffset = Vector3.zero;
                 this.IsClimbingGrabActive = false;
             }
 
@@ -3057,6 +3078,9 @@ namespace TavernFun
 
             // Token: 0x0400007F RID: 127
             public Vector3 ClimbPoseOffset;
+
+            // Camera-local offset driven by the Climbing Stuff menu's Move Grab reach-pull cycle.
+            public Vector3 MoveGrabPoseOffset;
 
             // Token: 0x04000080 RID: 128
             public Vector3 CombatPoseOffset;
